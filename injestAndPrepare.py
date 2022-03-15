@@ -43,7 +43,6 @@ import json, pickle, os
 
 
 # (batch, time interval, player, playerdata)
-# playerdata = headpos x, y, z, headrot x y z, lefthand x, y, z, lefthandrot x, y, z, righthandpos x, y, z, righthandrot x, y z
 MAX_TIMESTEPS = 10000
 MAX_PLAYERS = 100
 DATASET_NAME = 'sovreignschillhome'
@@ -122,8 +121,5 @@ if not os.path.exists('dataset'):
 
 with open(os.path.join('dataset', DATASET_NAME + '.pkl'), 'wb') as f:
     pickle.dump(data, f)
-
-# with open(os.path.join('dataset', OUTPUT_NAMEsovreignschillhome.pkl', 'wb') as f:
-#     pickle.dump(data, f)
 
 np.save(os.path.join('dataset', DATASET_NAME + '.npy'), data)
