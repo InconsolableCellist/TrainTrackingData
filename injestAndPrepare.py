@@ -46,6 +46,8 @@ import json, pickle, os
 # playerdata = headpos x, y, z, headrot x y z, lefthand x, y, z, lefthandrot x, y, z, righthandpos x, y, z, righthandrot x, y z
 MAX_TIMESTEPS = 10000
 MAX_PLAYERS = 100
+DATASET_NAME = 'sovreignschillhome'
+DATAFILE_NAME = 'sovreignschillhome.json'
 data = np.zeros((MAX_TIMESTEPS, MAX_PLAYERS, 18), dtype=np.float32)
 
 def get_xyz(tupleString):
@@ -73,7 +75,7 @@ def get_positional_offset_range(d):
 
 avg_time_offset = np.zeros(MAX_PLAYERS)
 last_time = 0
-with open('sovreignschillhome.json') as json_file:
+with open(os.path.join('input', DATAFILE_NAME)) as json_file:
     data_f = json.load(json_file)
     time_start_ms = data_f['sessionStart'] * 1000
     player_num = 0
@@ -115,7 +117,13 @@ print("min and max world positional data were: (" + str(min_position) + ", " + s
       "), normalized to 0.0 to 1.0")
 print("min and max rotational (Euler) data were assumed to be 0 to 360, normalized to 0.0 to 1.0")
 
-with open('sovreignschillhome.pkl', 'wb') as f:
+if not os.path.exists('dataset'):
+    os.mkdir('dataset')
+
+with open(os.path.join('dataset', DATASET_NAME + '.pkl'), 'wb') as f:
     pickle.dump(data, f)
 
-np.save('sovreignschillhome.npy', data)
+# with open(os.path.join('dataset', OUTPUT_NAMEsovreignschillhome.pkl', 'wb') as f:
+#     pickle.dump(data, f)
+
+np.save(os.path.join('dataset', DATASET_NAME + '.npy'), data)
