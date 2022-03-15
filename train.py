@@ -14,14 +14,20 @@ DATASET_PATH = 'dataset'
 dataset = {}
 with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
     data = pickle.load(f)
+for batch in data:
+    print("data shape: " + str(np.shape(batch)))
 
-model = Sequential()
-model.add(Flatten())
-model.add(Dense(128, activation='relu'))
-model.add(Dropout(0.2))
-model.add(Dense(50, activation='relu'))
+train = batch[0]
+test = batch[1]
 
 
-print("data shape: " + str(np.shape(data)))
-
+with tf.device("/GPU:0"):
+    model = Sequential()
+    model.add(Flatten())
+    model.add(Dense(128, activation=tf.nn.relu))
+    model.add(Dropout(0.2))
+    model.add(Dense(50, activation=tf.nn.softmax))
+    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    # model.fit(train, test, epochs=10)
+#
 
