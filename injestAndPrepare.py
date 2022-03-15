@@ -32,7 +32,9 @@
           "rightElbowPosition": "(-0.914610, 1.485900, 3.414665)",
           "rightElbowRotation": "(0.000000, 134.036100, 0.000000)",
           "hipPosition": "(-0.916085, 1.919870, 3.397258)",
-          "hipRotation": "(359.806000, 129.350000, 2.393322)"
+          "hipRotation": "(359.806000, 129.350000, 2.393322)",
+          "playerInstancePosition": "(3.903553, 0.994997, 7.229539)",
+          "playerInstanceRotation": "(0.033118, 66.259820, 0.157565)"
         },
         """
 ###
@@ -45,9 +47,9 @@ import json, pickle, os
 # (batch, time interval, player, playerdata)
 MAX_TIMESTEPS = 10000
 MAX_PLAYERS = 100
-DATASET_NAME = 'sovreignschillhome'
-DATAFILE_NAME = 'sovreignschillhome.json'
-data = np.zeros((MAX_TIMESTEPS, MAX_PLAYERS, 18), dtype=np.float32)
+DATASET_NAME = 'blackcatlocalposition'
+DATAFILE_NAME = 'blackcatlocalposition.json'
+data = np.zeros((MAX_TIMESTEPS, MAX_PLAYERS, 24), dtype=np.float32)
 
 def get_xyz(tupleString):
     x, y, z = tupleString[1:-1].split(',')
@@ -58,28 +60,40 @@ def get_xyz_normalized(tupleString, min_offset, max_offset):
     return (x - min_offset) / (max_offset - min_offset), (y - min_offset) / (max_offset - min_offset), \
            (z - min_offset) / (max_offset - min_offset)
 
+# Iterates through all the data and finds the bounds (min and max) for the global position and local offsets
+# Then returns them as (min_global, max_global, min_local, max_local)
 def get_positional_offset_range(d):
-    max_offset = -1
-    min_offset = int(1e9)
+    max_global_offset = -1
+    max_local_offset = -1
+    min_global_offset = int(1e9)
+    min_local_offset = int(1e9)
     for entry in d['data']:
         for td in d['data'][entry]['tracking_data']:
+            a = max(get_xyz(td['playerInstancePosition']))
+            b = min(get_xyz(td['playerInstancePosition']))
+            if a > max_global_offset:
+                max_global_offset = a
+            if b < min_global_offset:
+                min_global_offset = b
+
             for val in ['headPosition', 'leftHandPosition', 'rightHandPosition']:
                 a = max(get_xyz(td[val]))
                 b = min(get_xyz(td[val]))
-                if a > max_offset:
-                    max_offset = a
-                if b < min_offset:
-                    min_offset = b
-    return (min_offset, max_offset)
+                if a > max_local_offset:
+                    max_local_offset = a
+                if b < min_local_offset:
+                    min_local_offset = b
+    return (min_global_offset, max_global_offset, min_local_offset, max_local_offset)
 
 avg_time_offset = np.zeros(MAX_PLAYERS)
 last_time = 0
+observed_timesteps = np.zeros(MAX_TIMESTEPS)
 with open(os.path.join('input', DATAFILE_NAME)) as json_file:
     data_f = json.load(json_file)
     time_start_ms = data_f['sessionStart'] * 1000
     player_num = 0
     vals_added = 0
-    min_position, max_position = get_positional_offset_range(data_f)
+    min_global_pos, max_global_pos, min_local_pos, max_local_pos = get_positional_offset_range(data_f)
     for entry in data_f['data']:
         if player_num > MAX_PLAYERS:
             break
@@ -93,28 +107,39 @@ with open(os.path.join('input', DATAFILE_NAME)) as json_file:
                 avg_time_offset[player_num] += (data_time_ms - last_time)
             last_time = data_time_ms
 
-            data[time][player_num] = list(get_xyz_normalized(td['headPosition'], min_position, max_position)) \
+            data[time][player_num] =   list(get_xyz_normalized(td['playerInstancePosition'], min_global_pos, max_global_pos)) \
+                                     + list(get_xyz_normalized(td['playerInstanceRotation'], 0, 360)) \
+                                     + list(get_xyz_normalized(td['headPosition'], min_global_pos, max_global_pos)) \
                                      + list(get_xyz_normalized(td['headRotation'], 0, 360)) \
-                                     + list(get_xyz_normalized(td['leftHandPosition'], min_position, max_position)) \
+                                     + list(get_xyz_normalized(td['leftHandPosition'], min_global_pos, max_global_pos)) \
                                      + list(get_xyz_normalized(td['leftHandRotation'], 0, 360)) \
-                                     + list(get_xyz_normalized(td['rightHandPosition'], min_position, max_position)) \
+                                     + list(get_xyz_normalized(td['rightHandPosition'], min_global_pos, max_global_pos)) \
                                      + list(get_xyz_normalized(td['rightHandRotation'], 0, 360))
             vals_added += 18
 
             time += 1
+        observed_timesteps[player_num] = time
         avg_time_offset[player_num] /= abs(time - 1)
         player_num += 1
 
 avg_time_offset = avg_time_offset[avg_time_offset != 0]
+observed_timesteps = observed_timesteps[observed_timesteps != 0]
 
 print("processed " + str(player_num) + " players")
-print("added " + str(vals_added) + " values over " + str(time) + " timesteps covering " +
-      '{:.2f} minutes'.format(np.average(avg_time_offset) / 1000 * time / 60))
-print("Average time differential between datapoints is: " + '{:.4f} ms '.format(np.average(avg_time_offset)) +
+print("added " + str(vals_added) + " values.")
+
+print("There was an average of " + str(np.average(observed_timesteps)) + " timesteps per player" +
+      " with a standard deviation of {:.4f} timesteps".format(np.std(observed_timesteps)))
+print('Average time differential between datapoints is: {:.4f} ms '.format(np.average(avg_time_offset)) +
       'with a standard deviation of ' + '{:.4f} ms '.format(np.std(avg_time_offset)))
-print("min and max world positional data were: (" + str(min_position) + ", " + str(max_position) +
+print("min and max world positional data were: (" + str(min_global_pos) + ", " + str(max_global_pos) +
+      "), normalized to 0.0 to 1.0")
+print("min and max local positional data were: (" + str(min_local_pos) + ", " + str(max_local_pos) +
       "), normalized to 0.0 to 1.0")
 print("min and max rotational (Euler) data were assumed to be 0 to 360, normalized to 0.0 to 1.0")
+
+print("numpy data shape: " + str(np.shape(data)))
+# print("stripping zeros.\nnumpy data shape: " + str(np.shape(data)))
 
 if not os.path.exists('dataset'):
     os.mkdir('dataset')
