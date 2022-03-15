@@ -15,6 +15,13 @@ dataset = {}
 with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
     data = pickle.load(f)
 
+model = Sequential()
+model.add(Flatten())
+model.add(Dense(128, activation='relu'))
+model.add(Dropout(0.2))
+model.add(Dense(50, activation='relu'))
+
+
 print("data shape: " + str(np.shape(data)))
 
 
