@@ -17,17 +17,18 @@ with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
 for batch in data:
     print("data shape: " + str(np.shape(batch)))
 
-train = batch[0]
-test = batch[1]
+def GetRandomSubsetOfData(data, batch_size):
+    indices = np.random.randint(0, len(data), size=batch_size)
+    return data[indices]
 
-
+from tensorflow.keras import backend as K
 with tf.device("/GPU:0"):
     model = Sequential()
-    model.add(Flatten())
-    model.add(Dense(128, activation=tf.nn.relu))
-    model.add(Dropout(0.2))
-    model.add(Dense(50, activation=tf.nn.softmax))
+    # model.add(Flatten())
+    model.add(Dense(24, activation=tf.nn.relu))
+    # model.add(Dense(1, activation=tf.nn.sigmoid))
+    # model.add(Dropout(0.2))
+    # model.add(Dense(24, activation=tf.nn.relu))
     model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    # model.fit(train, test, epochs=10)
-#
-
+    # model.fit(x=data, y=None, epochs=10)
+    # model.convert = K.function(inputs=virtual_input, outputs=x)
