@@ -38,7 +38,7 @@
         },
         """
 ###
-
+import requests
 import tensorflow as tf
 import numpy as np
 import json, pickle, os
