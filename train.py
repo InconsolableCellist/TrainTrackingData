@@ -20,7 +20,6 @@ for batch in data:
 train = batch[0]
 test = batch[1]
 
-
 with tf.device("/GPU:0"):
     model = Sequential()
     model.add(Flatten())
