@@ -38,8 +38,7 @@
         },
         """
 ###
-import requests
-import tensorflow as tf
+
 import numpy as np
 import json, pickle, os
 
@@ -49,7 +48,7 @@ MAX_TIMESTEPS = 10000
 MAX_PLAYERS = 100
 DATASET_NAME = 'blackcatlocalposition'
 DATAFILE_NAMES = ['blackcatlocalposition.json', 'blackcatlocalposition2.json']
-data = np.zeros((MAX_TIMESTEPS, MAX_PLAYERS, 24), dtype=np.float32)
+data = np.zeros((len(DATAFILE_NAMES), MAX_TIMESTEPS, MAX_PLAYERS, 24), dtype=np.float32)
 
 def get_xyz(tupleString):
     x, y, z = tupleString[1:-1].split(',')
@@ -86,7 +85,7 @@ def get_positional_offset_range(d):
     return (min_global_offset, max_global_offset, min_local_offset, max_local_offset)
 
 
-def ProcessDatafile(datafile):
+def ProcessDatafile(datafile, datafile_num):
     avg_time_offset = np.zeros(MAX_PLAYERS)
     last_time = 0
     observed_timesteps = np.zeros(MAX_TIMESTEPS)
@@ -109,7 +108,7 @@ def ProcessDatafile(datafile):
                     avg_time_offset[player_num] += (data_time_ms - last_time)
                 last_time = data_time_ms
 
-                data[time][player_num] = list(
+                data[datafile_num][time][player_num] = list(
                     get_xyz_normalized(td['playerInstancePosition'], min_global_pos, max_global_pos)) \
                                          + list(get_xyz_normalized(td['playerInstanceRotation'], 0, 360)) \
                                          + list(get_xyz_normalized(td['headPosition'], min_global_pos, max_global_pos)) \
@@ -144,13 +143,17 @@ def ProcessDatafile(datafile):
     return data
 
 batches = []
-for datafile in DATAFILE_NAMES:
-    batches.append(ProcessDatafile(datafile))
+for i in range(0, len(DATAFILE_NAMES) - 1):
+    ProcessDatafile(DATAFILE_NAMES[i], i)
 
-print("----\nThere are " + str(len(batches)) + " batches of data")
+print(data.shape)
+# for datafile in DATAFILE_NAMES:
+#     batches.append(ProcessDatafile(datafile))
+
+print("----\nThere are " + str(len(data)) + " sessions of data")
 print("Saving data to " + DATASET_NAME)
 if not os.path.exists('dataset'):
     os.mkdir('dataset')
 with open(os.path.join('dataset', DATASET_NAME + '.pkl'), 'wb') as f:
-    pickle.dump(batches, f)
+    pickle.dump(data, f)
 # np.save(os.path.join('dataset', DATASET_NAME + '.npy'), data)
