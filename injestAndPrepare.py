@@ -47,7 +47,8 @@ import json, pickle, os
 MAX_TIMESTEPS = 10000
 MAX_PLAYERS = 100
 DATASET_NAME = 'blackcatlocalposition'
-DATAFILE_NAMES = ['blackcatlocalposition.json', 'blackcatlocalposition2.json']
+DATAFILE_NAMES = ['blackcatlocalposition.json', 'blackcatlocalposition2.json',
+                  'blackcatlocalposition3.json', 'blackcatlocalposition4.json']
 data = np.zeros((len(DATAFILE_NAMES), MAX_TIMESTEPS, MAX_PLAYERS, 24), dtype=np.float32)
 
 def get_xyz(tupleString):

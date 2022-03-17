@@ -1,13 +1,17 @@
 import pickle, os
+from random import random
+
 import numpy as np
 import torch
 import absl
+import wandb
 from torch.utils.data import DataLoader
 
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_DISABLED"] = "true"
+os.environ["WANDB_DISABLED"] = "false"
+os.environ["WANDB_MODE"] = "offline"
 DEVICE      = "cuda:0"
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
@@ -18,105 +22,115 @@ with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
     data = pickle.load(f)
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-def ConvertndArraytoTensor(ndarray):
-    return torch.from_numpy(ndarray).float().to(DEVICE)
 
-# Gets one sampling of data for a player
-def GetOneTimeslice(data, timeslice, player_num):
-    return data[timeslice][player_num]
+batch_size      = 16
+sequence_size   = 2048
+seq_index       = 0
+ses_index       = 0
 
-# Gets n seconds of data across all players
-def BatchGetNSeconds(seconds, data):
-    d = []
-    for time in range(starting_timeslice, seconds * 3):
-        for player_num in range(0, data.shape[1]):
-            if time < data.shape[0]:
-                d.append(GetOneTimeslice(data, time, player_num))
-    return d, time
+data_attention = np.ones(data.shape)
+
+def save_data_attention(data_attention, filename):
+    print(f'Saving data_attention to {filename}')
+    with open(filename, 'wb') as f:
+        pickle.dump(data_attention, f)
+
+if not os.path.exists('data_attention.pkl'):
+    print("exhaustively setting attention for padding because I can't think of another way to do it")
+    for session in range(0, data.shape[0]):
+        for time in range(0, data[session].shape[0]):
+            for player in range(0, data[session][time].shape[0]):
+                if np.all((data[session][time][player] == 0)):
+                    data_attention[session][time][player] = np.zeros(24)
+    save_data_attention(data_attention, 'data_attention.pkl')
+else:
+    with open('data_attention.pkl', 'rb') as f:
+        data_attention = pickle.load(f)
+    print("loaded data_attention.pkl. make sure it's not out of date")
+
+zeros = np.zeros_like(data)
+ones  = np.ones_like(data)
+data_attention = np.where(np.all(data > 0, axis=-1, keepdims=True), ones, zeros)
+
+test_data  = data[-1:]
+train_data = data[:-1]
+
+test_attention = data_attention[-1:]
+train_attention = data_attention[:-1]
 
 
-def ConvertListToTensor(data):
-    return torch.tensor(data, dtype=torch.float32).to(DEVICE)
+def read_one(data):
+    global seq_index, ses_index
+    sample = torch.tensor(data[ses_index][seq_index:seq_index+sequence_size])
+    seq_index += sequence_size
+    if seq_index + sequence_size >= data.shape[1]:
+        seq_index = int(random() * sequence_size)
+        ses_index += 1
+        if ses_index >= data.shape[0]:
+            ses_index = 0
+    return sample
 
-# def get_batch(last_timeslice, in_data, timeslice_size):
-#     return [ BatchGetNSeconds(1, in_data, last_timeslice + e * timeslice_size) for e in range(batch_count) ], last_timeslice + batch_count * timeslice_size
+def read_batch(data):
+    return torch.stack([ read_one(data) for e in range(batch_size) ], dim=0)
 
+print(f'data shape: {data.shape}')
+print(f'training data shape: {train_data.shape}')
+print(f'test data shape: {test_data.shape}')
+print(f'read_one shape: {read_one(train_data).shape}')
+print(f'read_batch shape: {read_batch(train_data).shape}')
 
-
-def PytorchTrainOnData(in_data, model, optimizer, loss_fn, epochs, batch_size, device, steps_per_epoch):
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_per_epoch):
     for epoch in range(epochs):
+        print(f'Epoch {epoch}')
         for step in range(steps_per_epoch):
-            # data = torch.tensor(data, dtype=torch.float32).to(device)
-            data = BatchGetNSeconds(1, in_data)
+            batch = read_batch(train_data)
+            batch = batch.to(DEVICE)
             optimizer.zero_grad()
-            data = ConvertListToTensor(data)
-            print(data.shape)
-            prediction = model(data)
-            # output = model(data)
-            loss = loss_fn(data[:, 1:], prediction[:, :-1])
+            output = model(batch)
+            loss = loss_fn(output[:, :-1], batch[:, 1:])
+            wandb.log({'loss': float(loss)})
             loss.backward()
             optimizer.step()
-            print("Epoch: " + str(epoch) + " Loss: " + str(loss))
+            print(f'\tStep {step} loss: {loss.item()}')
+        eval(model, optimizer, loss_fn, batch_size, steps_per_epoch)
 
-def DefineTorchModel(input_size, hidden_size, output_size):
+def eval(model, optimizer, loss_fn, batch_size, steps):
+    print(f'Evaluating model')
+    for step in range(steps):
+        batch = read_batch(train_data)
+        batch = batch.to(DEVICE)
+        optimizer.zero_grad()
+        output = model(batch)
+        loss = loss_fn(output[:, :-1], batch[:, 1:])
+        wandb.log({'training_loss': float(loss)})
+        optimizer.step()
+        print(f'\tTraining step {step} loss: {loss.item()}')
+
+
+def pytorch_define_model(input_size, output_size):
     model = torch.nn.Sequential(
-        torch.nn.Linear(input_size, hidden_size),
+        torch.nn.Linear(input_size, 10),
         torch.nn.ReLU(),
-        torch.nn.Linear(hidden_size, output_size),
+        torch.nn.Linear(10, output_size),
         torch.nn.ReLU(),
     )
     model.to(DEVICE)
     return model
 
+wandb.init(name="VRCTrackingModel", project="VRCTrackingModel")
 
-model = DefineTorchModel(input_size=24, hidden_size=10, output_size=24)
+model = pytorch_define_model(input_size=24, output_size=24)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 loss_fn = torch.nn.MSELoss()
-num_epochs = 10
-batch_size = 9 # 1 second = ~3 timeslices
-
-# sanity checks
-print("Number of sessions " + str(len(data)))
-# for index in range(len(data)):
-#     session = data[index]
-#     print("Session " + str(index))
-#     print("\tshape: " + str(np.shape(session)))
-#     print("\tGetting one timeslice of data, for all players")
-#     slice = GetOneTimeslice(session, 0, 0)
-#     print("\tTimeslice has a shape of " + str(slice.shape))
-#     print("\tGetting 10 seconds of data, for all players")
-#     slice = np.array(BatchGetNSeconds(10, session, 0))
-#     print("\t" + str(len(slice)) + " entries in the batch")
-#     print("\tBatch has a shape of " + str(slice.shape))
-
-# PytorchTrainOnData(data[0], model, optimizer, loss_fn, epochs, batch_size, DEVICE, 1000)
-
-
-def GetNSeconds(dataiter, n):
-    n *= 3
-    data = []
-    try:
-        for i in range(0, n):
-            data.append(dataiter.next())
-    except StopIteration:
-        pass
-    print(f'data shape: {np.shape(data)}')
-    return torch.tensor(data)
-
-
-dataset = VRCDataset(json_file = DATASET_FILE, root_dir=DATASET_PATH)
-for i, session in enumerate(dataset):
-    print("on session " + str(i))
-    dataloader = DataLoader(dataset=session, batch_size=batch_size, shuffle=True, num_workers=2)
-    dataiter = iter(dataloader)
-    print("\tshape of session: " + str(np.shape(session)))
-
-    # batches = GetNSeconds(dataiter, batch_size)
-
-    sequence_size = 1024
-    batches = torch.tensor([GetNSeconds(dataiter, sequence_size) for e in range(batch_size)])
-
-    print(f'\tGot {len(batches)} batches')
-    # for batch in batches:
-    #     total_samples = len(batch)
-    #     print("\tshape of batch: " + str(np.shape(batch)))
+num_epochs = 3
+batch_size = 9
+steps_per_epoch = 100
+print(f'Steps per epoch: {steps_per_epoch}')
+print(f'Batch size: {batch_size}')
+print(f'Training on {num_epochs} epochs')
+print(f'Device: {DEVICE}')
+print(f'Loss_fn: {loss_fn}')
+pytorch_train_on_data(model=model, optimizer=optimizer,
+                      loss_fn=loss_fn, epochs=num_epochs, batch_size=batch_size,
+                      steps_per_epoch=steps_per_epoch)
