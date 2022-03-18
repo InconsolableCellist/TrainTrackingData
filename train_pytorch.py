@@ -7,15 +7,16 @@ import absl
 import wandb
 from torch.utils.data import DataLoader
 
+from Bottleneck import Bottleneck
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_DISABLED"] = "false"
-os.environ["WANDB_MODE"] = "offline"
+os.environ["WANDB_MODE"] = "disabled"
 DEVICE      = "cuda:0"
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
 DATASET_PATH = 'dataset'
+MODEL_NAME = 'blackcatmodel'
 
 dataset = {}
 with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
@@ -34,19 +35,6 @@ def save_data_attention(data_attention, filename):
     print(f'Saving data_attention to {filename}')
     with open(filename, 'wb') as f:
         pickle.dump(data_attention, f)
-
-if not os.path.exists('data_attention.pkl'):
-    print("exhaustively setting attention for padding because I can't think of another way to do it")
-    for session in range(0, data.shape[0]):
-        for time in range(0, data[session].shape[0]):
-            for player in range(0, data[session][time].shape[0]):
-                if np.all((data[session][time][player] == 0)):
-                    data_attention[session][time][player] = np.zeros(24)
-    save_data_attention(data_attention, 'data_attention.pkl')
-else:
-    with open('data_attention.pkl', 'rb') as f:
-        data_attention = pickle.load(f)
-    print("loaded data_attention.pkl. make sure it's not out of date")
 
 zeros = np.zeros_like(data)
 ones  = np.ones_like(data)
@@ -76,8 +64,8 @@ def read_batch(data):
 print(f'data shape: {data.shape}')
 print(f'training data shape: {train_data.shape}')
 print(f'test data shape: {test_data.shape}')
-print(f'read_one shape: {read_one(train_data).shape}')
-print(f'read_batch shape: {read_batch(train_data).shape}')
+# print(f'read_one shape: {read_one(train_data).shape}')
+# print(f'read_batch shape: {read_batch(train_data).shape}')
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_per_epoch):
@@ -87,6 +75,7 @@ def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_p
             batch = read_batch(train_data)
             batch = batch.to(DEVICE)
             optimizer.zero_grad()
+            print(batch.shape) # [9, 2048, 100, 24] -- is this where it needs to be transposed to [2048, 9, 100]?
             output = model(batch)
             loss = loss_fn(output[:, :-1], batch[:, 1:])
             wandb.log({'loss': float(loss)})
@@ -102,13 +91,15 @@ def eval(model, optimizer, loss_fn, batch_size, steps):
         batch = batch.to(DEVICE)
         optimizer.zero_grad()
         output = model(batch)
+        # predicted = model(batch[:, :-1])
+        # loss = torch.nn.MSELoss(predicted, batch[:, [-1]])
         loss = loss_fn(output[:, :-1], batch[:, 1:])
         wandb.log({'training_loss': float(loss)})
         optimizer.step()
         print(f'\tTraining step {step} loss: {loss.item()}')
 
 
-def pytorch_define_model(input_size, output_size):
+def pytorch_define_model(input_size, hidden_size, output_size):
     model = torch.nn.Sequential(
         torch.nn.Linear(input_size, 10),
         torch.nn.ReLU(),
@@ -118,9 +109,21 @@ def pytorch_define_model(input_size, output_size):
     model.to(DEVICE)
     return model
 
+def pytorch_define_lstm_model(input_size, hidden_size, output_size):
+    model = torch.nn.Sequential(
+        Bottleneck(latent_size=hidden_size),
+        torch.nn.ReLU(),
+        torch.nn.Flatten(),
+        torch.nn.Linear(hidden_size, 1*100*24),
+        torch.nn.ReLU(),
+    )
+    model.to(DEVICE)
+    return model
+
 wandb.init(name="VRCTrackingModel", project="VRCTrackingModel")
 
-model = pytorch_define_model(input_size=24, output_size=24)
+# model = pytorch_define_model(input_size=24, hidden_size=10, output_size=24)
+model = pytorch_define_lstm_model(input_size=24, hidden_size=10, output_size=24)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 loss_fn = torch.nn.MSELoss()
 num_epochs = 3
@@ -134,3 +137,9 @@ print(f'Loss_fn: {loss_fn}')
 pytorch_train_on_data(model=model, optimizer=optimizer,
                       loss_fn=loss_fn, epochs=num_epochs, batch_size=batch_size,
                       steps_per_epoch=steps_per_epoch)
+
+def save_model(model, model_filename):
+    print(f'Saving model to {model_filename}')
+    torch.save(model.state_dict(), model_filename)
+
+save_model(model, MODEL_NAME + '.pt')
