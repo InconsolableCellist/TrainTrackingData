@@ -11,7 +11,7 @@ from Bottleneck import Bottleneck
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_MODE"] = "disabled"
+os.environ["WANDB_MODE"] = "online"
 DEVICE      = "cuda:0"
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
@@ -75,9 +75,13 @@ def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_p
             batch = read_batch(train_data)
             batch = batch.to(DEVICE)
             optimizer.zero_grad()
-            print(batch.shape) # [9, 2048, 100, 24] -- is this where it needs to be transposed to [2048, 9, 100]?
-            output = model(batch)
-            loss = loss_fn(output[:, :-1], batch[:, 1:])
+
+            batch_flat = torch.reshape(batch, (batch.shape[0], batch.shape[1], batch.shape[2] * batch.shape[3]))
+            output = model(batch_flat[:, :-1])
+
+            output = torch.reshape(output, (batch.shape[0], 1, 100, 24))
+            target = torch.reshape(batch[:, -1], (batch.shape[0], 1, 100, 24))
+            loss = loss_fn(output, target)
             wandb.log({'loss': float(loss)})
             loss.backward()
             optimizer.step()
@@ -86,17 +90,23 @@ def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_p
 
 def eval(model, optimizer, loss_fn, batch_size, steps):
     print(f'Evaluating model')
-    for step in range(steps):
-        batch = read_batch(train_data)
-        batch = batch.to(DEVICE)
-        optimizer.zero_grad()
-        output = model(batch)
-        # predicted = model(batch[:, :-1])
-        # loss = torch.nn.MSELoss(predicted, batch[:, [-1]])
-        loss = loss_fn(output[:, :-1], batch[:, 1:])
-        wandb.log({'training_loss': float(loss)})
-        optimizer.step()
-        print(f'\tTraining step {step} loss: {loss.item()}')
+    with torch.no_grad():
+        for step in range(steps):
+            batch = read_batch(train_data)
+            batch = batch.to(DEVICE)
+            optimizer.zero_grad()
+
+            batch_flat = torch.reshape(batch, (batch.shape[0], batch.shape[1], batch.shape[2] * batch.shape[3]))
+            output = model(batch_flat[:, :-1])
+            output = torch.reshape(output, (batch.shape[0], 1, 100, 24))
+
+            # loss = loss_fn(output[:, :-1], batch[:, 1:])
+            target = torch.reshape(batch[:, -1], (batch.shape[0], 1, 100, 24))
+            loss = loss_fn(output, target)
+
+            wandb.log({'eval_loss': float(loss)})
+            optimizer.step()
+            print(f'\tTraining step {step} loss: {loss.item()}')
 
 
 def pytorch_define_model(input_size, hidden_size, output_size):
@@ -128,7 +138,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 loss_fn = torch.nn.MSELoss()
 num_epochs = 3
 batch_size = 9
-steps_per_epoch = 100
+steps_per_epoch = 10
 print(f'Steps per epoch: {steps_per_epoch}')
 print(f'Batch size: {batch_size}')
 print(f'Training on {num_epochs} epochs')
