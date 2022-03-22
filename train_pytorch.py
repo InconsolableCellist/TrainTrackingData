@@ -11,7 +11,7 @@ from Bottleneck import Bottleneck
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_MODE"] = "online"
+os.environ["WANDB_MODE"] = "offline"
 DEVICE      = "cuda:0"
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
@@ -20,7 +20,12 @@ MODEL_NAME = 'blackcatmodel'
 
 dataset = {}
 with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
-    data = pickle.load(f)
+    input = pickle.load(f)
+
+data    = input['data']
+offsets = input['offsets']
+worldUUID    = input['worldUUID']
+sessionStart = input['sessionStart']
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -77,6 +82,9 @@ def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_p
             optimizer.zero_grad()
 
             batch_flat = torch.reshape(batch, (batch.shape[0], batch.shape[1], batch.shape[2] * batch.shape[3]))
+            # print(f'\tbatch_flat shape: {batch_flat.shape}')
+            # ([9, 2048, 2400])
+
             output = model(batch_flat[:, :-1])
 
             output = torch.reshape(output, (batch.shape[0], 1, 100, 24))
@@ -94,7 +102,6 @@ def eval(model, optimizer, loss_fn, batch_size, steps):
         for step in range(steps):
             batch = read_batch(train_data)
             batch = batch.to(DEVICE)
-            optimizer.zero_grad()
 
             batch_flat = torch.reshape(batch, (batch.shape[0], batch.shape[1], batch.shape[2] * batch.shape[3]))
             output = model(batch_flat[:, :-1])
@@ -105,7 +112,6 @@ def eval(model, optimizer, loss_fn, batch_size, steps):
             loss = loss_fn(output, target)
 
             wandb.log({'eval_loss': float(loss)})
-            optimizer.step()
             print(f'\tTraining step {step} loss: {loss.item()}')
 
 
@@ -148,8 +154,20 @@ pytorch_train_on_data(model=model, optimizer=optimizer,
                       loss_fn=loss_fn, epochs=num_epochs, batch_size=batch_size,
                       steps_per_epoch=steps_per_epoch)
 
-def save_model(model, model_filename):
-    print(f'Saving model to {model_filename}')
-    torch.save(model.state_dict(), model_filename)
+# def save_model(model, model_filename):
+#     print(f'Saving model to {model_filename}')
+#     torch.save(model.state_dict(), model_filename)
 
-save_model(model, MODEL_NAME + '.pt')
+# save_model(model, MODEL_NAME + '.pt')
+
+output = { 'model': model,
+           'offsets': offsets,
+           'worldUUID': worldUUID,
+           'sessionStart': sessionStart
+          }
+
+def save_model_pkl(model, model_filename):
+    print(f'Saving model to {model_filename}')
+    pickle.dump(model, open(model_filename, 'wb'))
+
+# save_model_pkl(output, MODEL_NAME + '.pkl')

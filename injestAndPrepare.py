@@ -63,6 +63,7 @@ def get_xyz_normalized(tupleString, min_offset, max_offset):
 # Iterates through all the data and finds the bounds (min and max) for the global position and local offsets
 # Then returns them as (min_global, max_global, min_local, max_local)
 def get_positional_offset_range(d):
+    global max_global_offset, min_global_offset, max_local_offset, min_local_offset
     max_global_offset = -1
     max_local_offset = -1
     min_global_offset = int(1e9)
@@ -87,6 +88,7 @@ def get_positional_offset_range(d):
 
 
 def ProcessDatafile(datafile, datafile_num):
+    global worldUUID, sessionStart
     avg_time_offset = np.zeros(MAX_PLAYERS)
     last_time = 0
     observed_timesteps = np.zeros(MAX_TIMESTEPS)
@@ -95,6 +97,8 @@ def ProcessDatafile(datafile, datafile_num):
         time_start_ms = data_f['sessionStart'] * 1000
         player_num = 0
         vals_added = 0
+        worldUUID = data_f['worldUUID']
+        sessionStart = data_f['sessionStart']
         min_global_pos, max_global_pos, min_local_pos, max_local_pos = get_positional_offset_range(data_f)
         for entry in data_f['data']:
             if player_num > MAX_PLAYERS:
@@ -152,9 +156,21 @@ print(data.shape)
 #     batches.append(ProcessDatafile(datafile))
 
 print("----\nThere are " + str(len(data)) + " sessions of data")
-print("Saving data to " + DATASET_NAME)
+print(f'Saving data to dataset/{DATASET_NAME}.pkl')
 if not os.path.exists('dataset'):
     os.mkdir('dataset')
+
+output_data = {'data': data,
+               'offsets' : {
+                   'max_global_offset': max_global_offset,
+                   'max_local_offset': max_local_offset,
+                   'min_global_offset': min_global_offset,
+                   'min_local_offset': min_local_offset
+                   },
+               'worldUUID': worldUUID,
+               'sessionStart': sessionStart,
+               }
+
 with open(os.path.join('dataset', DATASET_NAME + '.pkl'), 'wb') as f:
-    pickle.dump(data, f)
-# np.save(os.path.join('dataset', DATASET_NAME + '.npy'), data)
+    pickle.dump(output_data, f)
+np.save(os.path.join('dataset', DATASET_NAME + '.npy'), data)
