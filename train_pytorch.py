@@ -11,7 +11,7 @@ from Bottleneck import Bottleneck
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_MODE"] = "online"
+os.environ["WANDB_MODE"] = "offline"
 DEVICE      = "cuda:0"
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
@@ -94,10 +94,11 @@ def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_p
             output = torch.reshape(output, (batch.shape[0], 1, NUM_PLAYERS, 24))
             target = torch.reshape(batch[:, -1], (batch.shape[0], 1, NUM_PLAYERS, 24))
             loss = loss_fn(output, target)
-            wandb.log({'loss': float(loss)})
+            if not step % 10:
+                wandb.log({'loss': float(loss)})
+                print(f'\tStep {step} loss: {loss.item()}')
             loss.backward()
             optimizer.step()
-            print(f'\tStep {step} loss: {loss.item()}')
         eval(model, optimizer, loss_fn, batch_size, steps_per_epoch)
 
 def eval(model, optimizer, loss_fn, batch_size, steps):
