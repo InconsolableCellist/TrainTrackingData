@@ -3,10 +3,11 @@ import json
 import torch, pickle, os
 import numpy as np
 
-MODEL_NAME = 'blackcatmodel.pkl'
+MODEL_NAME  = 'blackcatmodel.pkl'
 DATAFILE_NAME = 'blackcatlocalposition.pkl'
-DATA_PATH = 'dataset'
-DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+DATA_PATH   = 'dataset'
+DEVICE      = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+NUM_PLAYERS = 30
 
 def open_model(filename):
     with open(filename, 'rb') as f:
@@ -52,28 +53,9 @@ context = torch.reshape(context, (context.shape[0], context.shape[1], context.sh
 print(f'context reshaped to be: {context.shape}')
 output = model(context)
 print(f'output from the model: {output.shape}')
-output = torch.reshape(output, (1, 1, 100, 24))
+output = torch.reshape(output, (1, 1, NUM_PLAYERS, 24))
 print(f'converting output to: {output.shape}')
 
-print("10 timeslices for player 0")
-for i in range(0, 10):
-    print(f'timeslice: {i}')
-    x, y, z = get_xyz(session[i][0], 0)
-    print(f'\tplayerInstancePosition\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
-    x, y, z = get_xyz(session[i][0], 3)
-    print(f'\tplayerInstanceRotation\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
-    x, y, z = get_xyz(session[i][0], 6)
-    print(f'\theadPosition\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
-    x, y, z = get_xyz(session[i][0], 9)
-    print(f'\theadRotation\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
-    x, y, z = get_xyz(session[i][0], 12)
-    print(f'\tleftHandPosition\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
-    x, y, z = get_xyz(session[i][0], 15)
-    print(f'\tleftHandRotation\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
-    x, y, z = get_xyz(session[i][0], 18)
-    print(f'\trightHandPosition\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
-    x, y, z = get_xyz(session[i][0], 21)
-    print(f'\trightHandRotation\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
 
 def save_output_to_pkl(output, offsets, filename):
     global data
@@ -115,3 +97,25 @@ def save_output_to_pkl(output, offsets, filename):
     f.close()
 
 save_output_to_pkl(output, offsets, 'prediction.json')
+
+
+
+# print("10 timeslices for player 0")
+# for i in range(0, 10):
+#     print(f'timeslice: {i}')
+#     x, y, z = get_xyz(session[i][0], 0)
+#     print(f'\tplayerInstancePosition\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
+#     x, y, z = get_xyz(session[i][0], 3)
+#     print(f'\tplayerInstanceRotation\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
+#     x, y, z = get_xyz(session[i][0], 6)
+#     print(f'\theadPosition\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
+#     x, y, z = get_xyz(session[i][0], 9)
+#     print(f'\theadRotation\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
+#     x, y, z = get_xyz(session[i][0], 12)
+#     print(f'\tleftHandPosition\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
+#     x, y, z = get_xyz(session[i][0], 15)
+#     print(f'\tleftHandRotation\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
+#     x, y, z = get_xyz(session[i][0], 18)
+#     print(f'\trightHandPosition\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')
+#     x, y, z = get_xyz(session[i][0], 21)
+#     print(f'\trightHandRotation\n\t\tx: {x:.6f}, y: {y:.6f}, z: {z:.6f}')

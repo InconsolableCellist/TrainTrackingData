@@ -43,13 +43,22 @@ import numpy as np
 import json, pickle, os
 
 
-# (batch, time interval, player, playerdata)
-MAX_TIMESTEPS = 10000
-MAX_PLAYERS = 100
-DATASET_NAME = 'blackcatlocalposition'
-DATAFILE_NAMES = ['blackcatlocalposition.json', 'blackcatlocalposition2.json',
-                  'blackcatlocalposition3.json', 'blackcatlocalposition4.json']
-data = np.zeros((len(DATAFILE_NAMES), MAX_TIMESTEPS, MAX_PLAYERS, 24), dtype=np.float32)
+# (batch, sequence/time, player, playerdata)
+import torch.nn
+
+MAX_TIMESTEPS = 1250
+MAX_PLAYERS   = 30
+DATASET_NAME  = 'blackcatlocalposition'
+DATAFILE_NAMES = []
+for file in os.listdir('input'):
+    if file.endswith('.json'):
+        DATAFILE_NAMES.append(file)
+
+DATAFILE_NAMES = sorted(DATAFILE_NAMES)
+data         = np.zeros((len(DATAFILE_NAMES), MAX_TIMESTEPS, MAX_PLAYERS, 24), dtype=np.float32)
+worldUUID    = ""
+sessionStart = 0.0
+players      = {}
 
 def get_xyz(tupleString):
     x, y, z = tupleString[1:-1].split(',')
@@ -86,9 +95,8 @@ def get_positional_offset_range(d):
                     min_local_offset = b
     return (min_global_offset, max_global_offset, min_local_offset, max_local_offset)
 
-
 def ProcessDatafile(datafile, datafile_num):
-    global worldUUID, sessionStart
+    global worldUUID, sessionStart, players, data
     avg_time_offset = np.zeros(MAX_PLAYERS)
     last_time = 0
     observed_timesteps = np.zeros(MAX_TIMESTEPS)
@@ -99,11 +107,13 @@ def ProcessDatafile(datafile, datafile_num):
         vals_added = 0
         worldUUID = data_f['worldUUID']
         sessionStart = data_f['sessionStart']
+        print(f'Processing {datafile}')
         min_global_pos, max_global_pos, min_local_pos, max_local_pos = get_positional_offset_range(data_f)
         for entry in data_f['data']:
             if player_num > MAX_PLAYERS:
                 break
             player = data_f['data'][entry]
+            players['playerUUID'] = player_num
             time = 0
             for td in player['tracking_data']:
                 if time > MAX_TIMESTEPS:
@@ -132,10 +142,11 @@ def ProcessDatafile(datafile, datafile_num):
             player_num += 1
     avg_time_offset = avg_time_offset[avg_time_offset != 0]
     observed_timesteps = observed_timesteps[observed_timesteps != 0]
+
     print("processed " + str(player_num) + " players")
     print("added " + str(vals_added) + " values.")
-    print("There was an average of " + str(np.average(observed_timesteps)) + " timesteps per player" +
-          " with a standard deviation of {:.4f} timesteps".format(np.std(observed_timesteps)))
+    print(f'There was an average of {np.average(observed_timesteps):.1f} timesteps per player ' +
+          f' with a standard deviation of {np.std(observed_timesteps):.2f} timesteps')
     print('Average time differential between datapoints is: {:.4f} ms '.format(np.average(avg_time_offset)) +
           'with a standard deviation of ' + '{:.4f} ms '.format(np.std(avg_time_offset)))
     print("min and max world positional data were: (" + str(min_global_pos) + ", " + str(max_global_pos) +
@@ -145,7 +156,9 @@ def ProcessDatafile(datafile, datafile_num):
     print("min and max rotational (Euler) data were assumed to be 0 to 360, normalized to 0.0 to 1.0")
     print("numpy data shape: " + str(np.shape(data)))
     # print("stripping zeros.\nnumpy data shape: " + str(np.shape(data)))
+    print(observed_timesteps)
     return data
+
 
 batches = []
 for i in range(0, len(DATAFILE_NAMES) - 1):
@@ -173,4 +186,6 @@ output_data = {'data': data,
 
 with open(os.path.join('dataset', DATASET_NAME + '.pkl'), 'wb') as f:
     pickle.dump(output_data, f)
-np.save(os.path.join('dataset', DATASET_NAME + '.npy'), data)
+# np.save(os.path.join('dataset', DATASET_NAME + '.npy'), data)
+# with open(os.path.join('dataset', DATASET_NAME + '.json'), 'w') as f:
+#     json.dump(output_data['data'].tolist(), f)
