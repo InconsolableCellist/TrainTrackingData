@@ -52,6 +52,7 @@ def get_xyz_scaled(data, offset, min_offset, max_offset):
     x, y, z = get_xyz(data, offset)
     return f'{x * min_offset:.6f}, {y * min_offset:.6f}, {z * min_offset:.6f}'
 
+# goes through each player and finds the first one that has all 0s for data, indicating it's not being used
 def set_ai_playernum():
     global ai_playernum
     for playernum in range(0, NUM_PLAYERS):
@@ -68,6 +69,7 @@ def set_context():
     di.process_data(context_meta)
     session = di.data[0]
     context = session[np.newaxis, :, :, :]
+    print(f'context.shape: {context.shape}') # [1, 1250, 30, 24]
     # context = torch.tensor(context).to(DEVICE)
     # context = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
     set_ai_playernum()
@@ -77,8 +79,6 @@ def set_context():
              'internal_shape': context.shape,
              'ai_playernum': ai_playernum, 'ai_timeslice': ai_timeslice,
              'ai_playerUUID': ai_playerUUID, 'ai_avatarID': ai_avatarID }
-
-
 
 def get_data_from_output(d):
     out_d = { 'ai_timeslice' : ai_timeslice, 'ai_playernum' : ai_playernum, 'ai_playerUUID' : ai_playerUUID, 'data': [] }
@@ -105,23 +105,28 @@ def get_data_from_output(d):
 # Runs the model and gets the next timeslice
 @app.route('/prediction', methods=['GET'])
 def get_prediction():
-    global context, ai_timeslice
+    global context, ai_timeslice, ai_playernum
     if type(context) is np.ndarray:
         context = torch.tensor(context).to(DEVICE)
-        context = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
-    output = model(context)
-    output = torch.reshape(output, (1, 1, NUM_PLAYERS, 24))
-    out_d = get_data_from_output(output)
-    context = torch.reshape(context, (context.shape[0], context.shape[1], NUM_PLAYERS, 24))
-    context[0, ai_timeslice, ai_playernum] = output[0, 0, ai_playernum]
+
     context = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
+    output = model(context)
+    context = torch.reshape(context, (context.shape[0], context.shape[1], NUM_PLAYERS, 24))
+    output = torch.reshape(output, (1, 1, NUM_PLAYERS, 24))
+    print(f'output[0, 0, :] = {output[0, 0, :]}')
+
     ai_timeslice += 1
+    out_d = get_data_from_output(output)
+    context[0, ai_timeslice, ai_playernum] = output[0, 0, ai_playernum]
+    print(f'context[0, {ai_timeslice}, {ai_playernum}]: {context[0, ai_timeslice, ai_playernum]}')
+    print(f'output[0, 0, {ai_playernum}]: {output[0, 0, ai_playernum]}')
+
     return out_d
 
 # sets ai_playerUUID and ai_avatarID from { 'playerUUID' : 'usr_...', 'avatarID', :'avtr_...' }
 @app.route('/player', methods=['POST'])
 def set_playerUUID():
-    global ai_playerUUID
+    global ai_playerUUID, ai_avatarID
     succ = True
     try:
         ai_playerUUID = request.json['playerUUID']
@@ -134,11 +139,10 @@ def set_playerUUID():
         : 'missing (@POST /context)' if context is None else 'OK' }
     return { 'success': False }
 
-
 # sets the initial position of the AI character
 @app.route('/position', methods=['POST'])
 def set_position():
-    global ai_timeslice
+    global context, ai_timeslice, ai_playernum
     if context is None:
         return { 'success': False, 'context' : 'missing (@POST /context)' }
     data = request.json
@@ -152,13 +156,17 @@ def set_position():
         list(DataInjestor.get_xyz_normalized(data['rightHandPosition'], offsets['min_local_offset'], offsets['max_local_offset'])) + \
         list(DataInjestor.get_xyz_normalized(data['rightHandRotation'], 0, 360))
 
-    return { 'success': True }
+    return { 'success': True, 'context_normalized': context[0, 0, ai_playernum].tolist() }
 
 # returns the ai_playernum
 @app.route('/playernum', methods=['GET'])
 def get_playernum():
     return jsonify({ 'ai_playernum' : ai_playernum})
 
+@app.route('/get_all_ai_data', methods=['GET'])
+def get_all_ai_data():
+    return jsonify({ 'ai_playerUUID' : ai_playerUUID, 'ai_avatarID' : ai_avatarID, 'ai_timeslice' : ai_timeslice,
+                     'data' : context[0, :, ai_playernum].tolist(), 'context_shape': context.shape })
 
 def load_model(model_path, model_name):
     global model_meta, model, offsets
@@ -168,14 +176,9 @@ def load_model(model_path, model_name):
         model   = model_meta['model']
         offsets = model_meta['offsets']
 
-
-def main():
+if __name__ == "__main__":
     load_model(MODEL_PATH, MODEL_NAME)
     app.run(host='127.0.0.1', debug=True)
-
-
-if __name__ == "__main__":
-    main()
 
 
 ###
