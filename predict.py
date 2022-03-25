@@ -3,7 +3,8 @@ import json
 import torch, pickle, os
 import numpy as np
 
-MODEL_NAME  = 'blackcatmodel.pkl'
+MODEL_NAME  = 'blackcatmodel-steps_100-batchsize_5000-epochs_75-latentsize_2048.pkl'
+MODEL_PATH  = 'models'
 DATAFILE_NAME = 'blackcatlocalposition.pkl'
 DATA_PATH   = 'dataset'
 DEVICE      = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -38,7 +39,7 @@ def get_xyz_scaled(data, offset, min_offset, max_offset):
     return f'{x * min_offset:.6f}, {y * min_offset:.6f}, {z * min_offset:.6f}'
 
 
-model_meta = open_model_pkl(MODEL_NAME)
+model_meta = open_model_pkl(os.path.join(MODEL_PATH, MODEL_NAME))
 model = model_meta['model']
 input = open_data_file(DATA_PATH, DATAFILE_NAME)
 data  = input['data']
@@ -57,7 +58,7 @@ output = torch.reshape(output, (1, 1, NUM_PLAYERS, 24))
 print(f'converting output to: {output.shape}')
 
 
-def save_output_to_pkl(output, offsets, filename):
+def save_output(output, offsets, filename):
     global data
     if not os.path.exists('output'):
         os.makedirs('output')
@@ -96,7 +97,7 @@ def save_output_to_pkl(output, offsets, filename):
     json.dump(out_d, f)
     f.close()
 
-save_output_to_pkl(output, offsets, 'prediction.json')
+save_output(output, offsets, 'prediction.json')
 
 
 
