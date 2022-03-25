@@ -3,15 +3,14 @@ from random import random
 
 import numpy as np
 import torch
-import absl
+import time
 import wandb
-from torch.utils.data import DataLoader
 
 from Bottleneck import Bottleneck
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_MODE"] = "offline"
+os.environ["WANDB_MODE"] = "online"
 DEVICE      = "cuda:0"
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
@@ -32,9 +31,10 @@ sessionStart = input['sessionStart']
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 sequence_size   = 32 # ~3 per second
-num_epochs      = 50
-batch_size      = 40
-steps_per_epoch = 20000
+num_epochs      = 75
+batch_size      = 5000
+steps_per_epoch = 100
+latent_size     = 2048
 seq_index       = 0
 ses_index       = 0
 
@@ -94,9 +94,9 @@ def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_p
             output = torch.reshape(output, (batch.shape[0], 1, NUM_PLAYERS, 24))
             target = torch.reshape(batch[:, -1], (batch.shape[0], 1, NUM_PLAYERS, 24))
             loss = loss_fn(output, target)
-            if not step % 10:
-                wandb.log({'loss': float(loss)})
-                print(f'\tStep {step} loss: {loss.item()}')
+            # if not step % 10:
+            wandb.log({'loss': float(loss)})
+            print(f'\tStep {step} loss: {loss.item()}')
             loss.backward()
             optimizer.step()
         eval(model, optimizer, loss_fn, batch_size, steps_per_epoch)
@@ -119,18 +119,18 @@ def eval(model, optimizer, loss_fn, batch_size, steps):
         print(f'\tTraining loss: {loss.item()}')
 
 
-def pytorch_define_lstm_model(input_size, output_size):
+def pytorch_define_lstm_model(input_size, output_size, latent_size):
     model = torch.nn.Sequential(
-        Bottleneck(latent_size=10),
+        Bottleneck(latent_size=latent_size),
         torch.nn.ReLU(),
-        torch.nn.Linear(10, 20),
+        torch.nn.Linear(latent_size, latent_size),
         torch.nn.ReLU(),
-        torch.nn.Linear(20, 10),
+        torch.nn.Linear(latent_size, latent_size//2),
         torch.nn.ReLU(),
-        torch.nn.Linear(10, 20),
+        torch.nn.Linear(latent_size//2, latent_size//4),
         torch.nn.ReLU(),
         torch.nn.Flatten(),
-        torch.nn.Linear(20, 1*NUM_PLAYERS*24),
+        torch.nn.Linear(latent_size//4, 1*NUM_PLAYERS*24),
         torch.nn.ReLU(),
     )
     model.to(DEVICE)
@@ -144,7 +144,7 @@ def prepare_embedding():
 
 wandb.init(name="VRCTrackingModel", project="VRCTrackingModel")
 
-model       = pytorch_define_lstm_model(input_size=24, output_size=24)
+model       = pytorch_define_lstm_model(input_size=24, output_size=24, latent_size=latent_size)
 optimizer   = torch.optim.Adam(model.parameters(), lr=0.001)
 loss_fn     = torch.nn.MSELoss()
 embedding   = prepare_embedding() #torch.nn.Embedding(num_embeddings=NUM_PLAYERS, embedding_dim=1)
@@ -166,7 +166,12 @@ output = { 'model': model,
           }
 
 def save_model_pkl(model, model_filename):
+    if os.path.exists(model_filename + '.pkl'):
+        model_filename = model_filename + '-' + time.strftime("%Y%m%d-%H%M%S") + '.pkl'
+    else:
+        model_filename = model_filename + '.pkl'
     print(f'Saving model to {model_filename}')
     pickle.dump(model, open(model_filename, 'wb'))
 
-save_model_pkl(output, MODEL_NAME + '.pkl')
+filename = f'{MODEL_NAME}-steps_{steps_per_epoch}-batchsize_{batch_size}-epochs_{num_epochs}-latentsize_{latent_size}'
+save_model_pkl(output, filename)
