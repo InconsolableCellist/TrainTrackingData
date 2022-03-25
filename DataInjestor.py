@@ -45,23 +45,32 @@ import json, pickle, os
 # (batch, sequence/time, player, playerdata)
 
 class DataInjestor:
-    def __init__(self, max_timesteps, max_players, datafile_names):
+    def __init__(self, max_timesteps, max_players, datafile_names=None):
         self.max_timesteps = max_timesteps
         self.max_players = max_players
         self.datafile_names = datafile_names
-        self.data         = np.zeros((len(datafile_names), max_timesteps, max_players, 24), dtype=np.float32)
+        self.data         = np.zeros((1 if datafile_names is None else len(datafile_names), max_timesteps, max_players, 24), dtype=np.float32)
         self.worldUUID    = ""
         self.sessionStart = 0.0
         self.players      = {}
+        self.min_global_pos = int(1e9)
+        self.max_global_pos = -1
+        self.min_local_pos = int(1e9)
+        self.max_local_pos = -1
+        self.max_global_offset = -1
+        self.max_local_offset = -1
+        self.min_global_offset = int(1e9)
+        self.min_local_offset = int(1e9)
         pass
 
-
-    def get_xyz(self, tupleString):
+    @staticmethod
+    def get_xyz(tupleString):
         x, y, z = tupleString[1:-1].split(',')
         return float(x), float(y), float(z)
 
-    def get_xyz_normalized(self, tupleString, min_offset, max_offset):
-        x, y, z = self.get_xyz(tupleString)
+    @staticmethod
+    def get_xyz_normalized(tupleString, min_offset, max_offset):
+        x, y, z = DataInjestor.get_xyz(tupleString)
         return (x - min_offset) / (max_offset - min_offset), (y - min_offset) / (max_offset - min_offset), \
                (z - min_offset) / (max_offset - min_offset)
 
@@ -69,11 +78,7 @@ class DataInjestor:
     # Iterates through all the data and finds the bounds (min and max) for the global position and local offsets
     # Then returns them as (min_global, max_global, min_local, max_local)
     def get_positional_offset_range(self, d):
-        global max_global_offset, min_global_offset, max_local_offset, min_local_offset
-        max_global_offset = -1
-        max_local_offset = -1
-        min_global_offset = int(1e9)
-        min_local_offset = int(1e9)
+        max_global_offset, max_local_offset, min_global_offset, min_local_offset = -1, -1, int(1e9), int(1e9)
         for entry in d['data']:
             for td in d['data'][entry]['tracking_data']:
                 a = max(self.get_xyz(td['playerInstancePosition']))
@@ -90,6 +95,10 @@ class DataInjestor:
                         max_local_offset = a
                     if b < min_local_offset:
                         min_local_offset = b
+        self.max_global_offset = max_global_offset
+        self.max_local_offset = max_local_offset
+        self.min_global_offset = min_global_offset
+        self.min_local_offset = min_local_offset
         return (min_global_offset, max_global_offset, min_local_offset, max_local_offset)
 
     def process_datafile(self, datafile, datafile_num):
@@ -99,23 +108,23 @@ class DataInjestor:
             return self.process_data(data_f)
 
     def process_data(self, data_f, datafile_num=0):
-        avg_time_offset = np.zeros(MAX_PLAYERS)
+        avg_time_offset = np.zeros(self.max_players)
         last_time = 0
-        observed_timesteps = np.zeros(MAX_TIMESTEPS)
+        observed_timesteps = np.zeros(self.max_timesteps)
         time_start_ms = data_f['sessionStart'] * 1000
         player_num = 0
         vals_added = 0
         worldUUID = data_f['worldUUID']
         sessionStart = data_f['sessionStart']
-        min_global_pos, max_global_pos, min_local_pos, max_local_pos = self.get_positional_offset_range(data_f)
+        self.min_global_pos, self.max_global_pos, self.min_local_pos, self.max_local_pos = self.get_positional_offset_range(data_f)
         for entry in data_f['data']:
-            if player_num > MAX_PLAYERS:
+            if player_num > self.max_players:
                 break
             player = data_f['data'][entry]
             self.players['playerUUID'] = player_num
             time = 0
             for td in player['tracking_data']:
-                if time > MAX_TIMESTEPS:
+                if time > self.max_timesteps:
                     break
                 data_time_ms = td['timestamp'] - time_start_ms
                 if time > 0:
@@ -123,15 +132,15 @@ class DataInjestor:
                 last_time = data_time_ms
 
                 self.data[datafile_num][time][player_num] = list(
-                    self.get_xyz_normalized(td['playerInstancePosition'], min_global_pos, max_global_pos)) \
+                    self.get_xyz_normalized(td['playerInstancePosition'], self.min_global_pos, self.max_global_pos)) \
                                                             + list(self.get_xyz_normalized(td['playerInstanceRotation'], 0, 360)) \
-                                                            + list(self.get_xyz_normalized(td['headPosition'], min_global_pos, max_global_pos)) \
+                                                            + list(self.get_xyz_normalized(td['headPosition'], self.min_global_pos, self.max_global_pos)) \
                                                             + list(self.get_xyz_normalized(td['headRotation'], 0, 360)) \
                                                             + list(
-                    self.get_xyz_normalized(td['leftHandPosition'], min_global_pos, max_global_pos)) \
+                    self.get_xyz_normalized(td['leftHandPosition'], self.min_global_pos, self.max_global_pos)) \
                                                             + list(self.get_xyz_normalized(td['leftHandRotation'], 0, 360)) \
                                                             + list(
-                    self.get_xyz_normalized(td['rightHandPosition'], min_global_pos, max_global_pos)) \
+                    self.get_xyz_normalized(td['rightHandPosition'], self.min_global_pos, self.max_global_pos)) \
                                                             + list(self.get_xyz_normalized(td['rightHandRotation'], 0, 360))
                 vals_added += 18
 
@@ -148,54 +157,12 @@ class DataInjestor:
               f' with a standard deviation of {np.std(observed_timesteps):.2f} timesteps')
         print('Average time differential between datapoints is: {:.4f} ms '.format(np.average(avg_time_offset)) +
               'with a standard deviation of ' + '{:.4f} ms '.format(np.std(avg_time_offset)))
-        print("min and max world positional data were: (" + str(min_global_pos) + ", " + str(max_global_pos) +
+        print("min and max world positional data were: (" + str(self.min_global_pos) + ", " + str(self.max_global_pos) +
               "), normalized to 0.0 to 1.0")
-        print("min and max local positional data were: (" + str(min_local_pos) + ", " + str(max_local_pos) +
+        print("min and max local positional data were: (" + str(self.min_local_pos) + ", " + str(self.max_local_pos) +
               "), normalized to 0.0 to 1.0")
         print("min and max rotational (Euler) data were assumed to be 0 to 360, normalized to 0.0 to 1.0")
         print("numpy data shape: " + str(np.shape(self.data)))
         # print("stripping zeros.\nnumpy data shape: " + str(np.shape(data)))
         print(observed_timesteps)
         # return self.data
-
-
-
-MAX_TIMESTEPS = 1250
-MAX_PLAYERS   = 30
-DATAFILE_NAMES = []
-for file in os.listdir('input'):
-    if file.endswith('.json'):
-        DATAFILE_NAMES.append(file)
-DATASET_NAME = "blackcatlocalposition"
-DATAFILE_NAMES = sorted(DATAFILE_NAMES)
-
-di = DataInjestor(max_timesteps = MAX_TIMESTEPS, max_players = MAX_PLAYERS, datafile_names = DATAFILE_NAMES)
-batches = []
-for i in range(0, len(DATAFILE_NAMES) - 1):
-    di.process_datafile(DATAFILE_NAMES[i], i)
-
-print(di.data.shape)
-# for datafile in DATAFILE_NAMES:
-#     batches.append(ProcessDatafile(datafile))
-
-print("----\nThere are " + str(len(di.data)) + " sessions of data")
-print(f'Saving data to dataset/{DATASET_NAME}.pkl')
-if not os.path.exists('dataset'):
-    os.mkdir('dataset')
-
-output_data = {'data': di.data,
-               'offsets' : {
-                   'max_global_offset': max_global_offset,
-                   'max_local_offset': max_local_offset,
-                   'min_global_offset': min_global_offset,
-                   'min_local_offset': min_local_offset
-                   },
-               'worldUUID': di.worldUUID,
-               'sessionStart': di.sessionStart,
-               }
-
-with open(os.path.join('dataset', DATASET_NAME + '.pkl'), 'wb') as f:
-    pickle.dump(output_data, f)
-# np.save(os.path.join('dataset', DATASET_NAME + '.npy'), data)
-# with open(os.path.join('dataset', DATASET_NAME + '.json'), 'w') as f:
-#     json.dump(output_data['data'].tolist(), f)
