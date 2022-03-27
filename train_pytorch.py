@@ -10,7 +10,7 @@ from Bottleneck import Bottleneck
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_MODE"] = "online"
+os.environ["WANDB_MODE"] = "offline"
 DEVICE      = "cuda:0"
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
@@ -23,7 +23,7 @@ dataset = {}
 with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
     input = pickle.load(f)
 
-data    = input['data']
+data    = np.asarray(input['data'])
 offsets = input['offsets']
 worldUUID    = input['worldUUID']
 sessionStart = input['sessionStart']
@@ -47,13 +47,13 @@ def save_data_attention(data_attention, filename):
 
 zeros = np.zeros_like(data)
 ones  = np.ones_like(data)
-data_attention = np.where(np.all(data > 0, axis=-1, keepdims=True), ones, zeros)
+# data_attention = np.where(np.all(data > 0, axis=-1, keepdims=True), ones, zeros)
 
 test_data  = data[-1:]
 train_data = data[:-1]
 
-test_attention  = data_attention[-1:]
-train_attention = data_attention[:-1]
+# test_attention  = data_attention[-1:]
+# train_attention = data_attention[:-1]
 
 
 def read_one(data):

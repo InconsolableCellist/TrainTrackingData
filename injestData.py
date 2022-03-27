@@ -1,9 +1,11 @@
+import numpy
+
 from DataInjestor import DataInjestor
 import os
 import pickle
 
-MAX_TIMESTEPS = 1250
-MAX_PLAYERS   = 30
+MAX_TIMESTEPS = 10000 # will get trimmed per player
+MAX_PLAYERS   = 30 # will not get trimmed
 DATAFILE_NAMES = []
 for file in os.listdir('input'):
     if file.endswith('.json'):
@@ -12,13 +14,15 @@ DATASET_NAME = "blackcatlocalposition"
 DATAFILE_NAMES = sorted(DATAFILE_NAMES)
 
 di = DataInjestor(max_timesteps = MAX_TIMESTEPS, max_players = MAX_PLAYERS, datafile_names = DATAFILE_NAMES)
-batches = []
 for i in range(0, len(DATAFILE_NAMES) - 1):
     di.process_datafile(DATAFILE_NAMES[i], i)
 
-print(di.data.shape)
 
-print("----\nThere are " + str(len(di.data)) + " sessions of data")
+print("----\nAll data loaded.\nThere are " + str(len(di.data)) + " sessions of data")
+print(f'data shape for all {len(di.data)} sessions:')
+for session in di.data:
+    print(f'\t{session.shape}')
+
 print(f'Saving data to dataset/{DATASET_NAME}.pkl')
 if not os.path.exists('dataset'):
     os.mkdir('dataset')

@@ -42,14 +42,17 @@
 import numpy as np
 import json, pickle, os
 
-# (batch, sequence/time, player, playerdata)
+# output
+# (batch/session, sequence/time, player, playerdata)
 
 class DataInjestor:
     def __init__(self, max_timesteps, max_players, datafile_names=None):
         self.max_timesteps = max_timesteps
         self.max_players = max_players
         self.datafile_names = datafile_names
-        self.data         = np.zeros((1 if datafile_names is None else len(datafile_names), max_timesteps, max_players, 24), dtype=np.float32)
+        # self.data         = np.zeros((1 if datafile_names is None else len(datafile_names), max_timesteps, max_players, 24), dtype=np.float32)
+        # self.data         = np.zeros((1 if datafile_names is None else len(datafile_names)), dtype=np.float32)
+        self.data         = []
         self.worldUUID    = ""
         self.sessionStart = 0.0
         self.players      = {}
@@ -101,11 +104,20 @@ class DataInjestor:
         self.min_local_offset = min_local_offset
         return (min_global_offset, max_global_offset, min_local_offset, max_local_offset)
 
+    # Iterates through input data and checks to see if all playerdata is zero, and if so it returns the timeslice
+    # right before it
+    def get_last_filled_timeslice(self, d):
+        max_timeslice = 0
+        for player in d:
+            if len(d[player]['tracking_data']) > max_timeslice:
+                max_timeslice = len(d[player]['tracking_data'])
+        return max_timeslice
+
     def process_datafile(self, datafile, datafile_num):
-        print(f'Processing {datafile}')
+        print(f'\n\nProcessing {datafile}')
         with open(os.path.join('input', datafile)) as json_file:
             data_f = json.load(json_file)
-            return self.process_data(data_f)
+            return self.process_data(data_f, datafile_num)
 
     def process_data(self, data_f, datafile_num=0):
         avg_time_offset = np.zeros(self.max_players)
@@ -114,15 +126,32 @@ class DataInjestor:
         time_start_ms = data_f['sessionStart'] * 1000
         player_num = 0
         vals_added = 0
-        worldUUID = data_f['worldUUID']
-        sessionStart = data_f['sessionStart']
+        # worldUUID = data_f['worldUUID']
+        # sessionStart = data_f['sessionStart']
+        last_filled_timeslice = self.get_last_filled_timeslice(data_f['data'])
+
+        # print(f'self.data shape before stripping timeslices: {self.data.shape}')
+        # valid_timeslices = []
+        # for i in range(0, last_filled_timeslice):
+        #     valid_timeslices.append(self.data[datafile_num, i])
+        # print(f'length of valid_timeslices: {len(valid_timeslices)}')
+        # valid_timeslices = np.zeros((len(valid_timeslices), self.max_players, 24))
+        self.data.append(np.zeros((last_filled_timeslice, self.max_players, 24), dtype=np.float32))
+        # print(f'shape of valid_timeslices: {valid_timeslices.shape}')
+        # self.data[datafile_num] = valid_timeslices
+        # self.data[datafile_num] = valid_timeslices
+        # print(f'self.data shape when considering only valid timeslices: {self.data.shape}')
+        print(f'Last filled timeslice: {last_filled_timeslice}')
+        print(f'Shape of self.data[{datafile_num}]: {self.data[datafile_num].shape}')
+
         self.min_global_pos, self.max_global_pos, self.min_local_pos, self.max_local_pos = self.get_positional_offset_range(data_f)
         for entry in data_f['data']:
+            player_data = []
             if player_num > self.max_players:
                 break
             player = data_f['data'][entry]
             self.players['playerUUID'] = player_num
-            print(f'Processing player {player_num} with UUID {player["playerUUID"]}')
+            # print(f'Processing player {player_num} with UUID {player["playerUUID"]}')
             time = 0
             for td in player['tracking_data']:
                 if time > self.max_timesteps:
@@ -132,7 +161,8 @@ class DataInjestor:
                     avg_time_offset[player_num] += (data_time_ms - last_time)
                 last_time = data_time_ms
 
-                self.data[datafile_num][time][player_num] = list(
+                self.data[datafile_num][time, player_num] = list(
+                # player_data.append(list(
                     self.get_xyz_normalized(td['playerInstancePosition'], self.min_global_pos, self.max_global_pos)) \
                                                             + list(self.get_xyz_normalized(td['playerInstanceRotation'], 0, 360)) \
                                                             + list(self.get_xyz_normalized(td['headPosition'], self.min_global_pos, self.max_global_pos)) \
@@ -154,16 +184,31 @@ class DataInjestor:
 
         print("processed " + str(player_num) + " players")
         print("added " + str(vals_added) + " values.")
-        print(f'There was an average of {np.average(observed_timesteps):.1f} timesteps per player ' +
+        print(f'\tThere was an average of {np.average(observed_timesteps):.1f} timesteps per player ' +
               f' with a standard deviation of {np.std(observed_timesteps):.2f} timesteps')
-        print('Average time differential between datapoints is: {:.4f} ms '.format(np.average(avg_time_offset)) +
+        print('\tAverage time differential between datapoints is: {:.4f} ms '.format(np.average(avg_time_offset)) +
               'with a standard deviation of ' + '{:.4f} ms '.format(np.std(avg_time_offset)))
-        print("min and max world positional data were: (" + str(self.min_global_pos) + ", " + str(self.max_global_pos) +
+        print("\tmin and max world positional data were: (" + str(self.min_global_pos) + ", " + str(self.max_global_pos) +
               "), normalized to 0.0 to 1.0")
-        print("min and max local positional data were: (" + str(self.min_local_pos) + ", " + str(self.max_local_pos) +
+        print("\tmin and max local positional data were: (" + str(self.min_local_pos) + ", " + str(self.max_local_pos) +
               "), normalized to 0.0 to 1.0")
-        print("min and max rotational (Euler) data were assumed to be 0 to 360, normalized to 0.0 to 1.0")
-        print("numpy data shape: " + str(np.shape(self.data)))
-        # print("stripping zeros.\nnumpy data shape: " + str(np.shape(data)))
-        print(observed_timesteps)
-        return self.data
+        print("\tmin and max rotational (Euler) data were assumed to be 0 to 360, normalized to 0.0 to 1.0")
+
+        # example
+        """
+        processed 18 players
+        added 186714 values.
+        There was an average of 691.5 timesteps per player  with a standard deviation of 188.92 timesteps
+        Average time differential between datapoints is: 281.2408 ms with a standard deviation of 8.2689 ms 
+        min and max world positional data were: (-27.19471, 34.87209), normalized to 0.0 to 1.0
+        min and max local positional data were: (-0.531871, 2.618917), normalized to 0.0 to 1.0
+        min and max rotational (Euler) data were assumed to be 0 to 360, normalized to 0.0 to 1.0
+        numpy data shape: (11, 1250, 30, 24)
+        [758. 758. 758.  18. 758. 527. 758. 732. 758. 758. 758. 758. 758. 758.
+         758.]
+        (11, 1250, 30, 24)
+        ----
+        There are 11 sessions of data
+        """
+
+        print(f'observed timesteps for this session: {observed_timesteps}')
