@@ -98,6 +98,7 @@ def save_output(output, offsets, filename):
     f.close()
 
 save_output(output, offsets, 'prediction.json')
+print(f'output[0, 0]: {output[0, 0]}')
 
 
 

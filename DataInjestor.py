@@ -122,6 +122,7 @@ class DataInjestor:
                 break
             player = data_f['data'][entry]
             self.players['playerUUID'] = player_num
+            print(f'Processing player {player_num} with UUID {player["playerUUID"]}')
             time = 0
             for td in player['tracking_data']:
                 if time > self.max_timesteps:
@@ -165,4 +166,4 @@ class DataInjestor:
         print("numpy data shape: " + str(np.shape(self.data)))
         # print("stripping zeros.\nnumpy data shape: " + str(np.shape(data)))
         print(observed_timesteps)
-        # return self.data
+        return self.data

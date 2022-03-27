@@ -66,15 +66,20 @@ def set_context():
     global context, context_meta, ai_playernum, ai_timeslice
     context_meta = request.json
     di = DataInjestor(max_timesteps=MAX_TIMESTEPS, max_players=NUM_PLAYERS)
-    di.process_data(context_meta)
-    session = di.data[0]
-    context = session[np.newaxis, :, :, :]
-    print(f'context.shape: {context.shape}') # [1, 1250, 30, 24]
-    # context = torch.tensor(context).to(DEVICE)
-    # context = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
+    context = di.process_data(context_meta)
+    context = context[:, :10, :, :]
+    print(f'context.shape: {context.shape}')
     set_ai_playernum()
 
-    return { 'success': True , 'input_shape': session.shape,
+    context = torch.tensor(context).to(DEVICE)
+
+    # print(f'context[0, 0, 0]: {context[0, 0, 0]}')
+    # context = di.data
+    # context = session[np.newaxis, :, :, :]
+    # context = torch.tensor(context).to(DEVICE)
+    # context = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
+
+    return { 'success': True , 'input_shape': di.data.shape,
              'max_timesteps': di.max_timesteps, 'max_players': di.max_players,
              'internal_shape': context.shape,
              'ai_playernum': ai_playernum, 'ai_timeslice': ai_timeslice,
@@ -106,20 +111,28 @@ def get_data_from_output(d):
 @app.route('/prediction', methods=['GET'])
 def get_prediction():
     global context, ai_timeslice, ai_playernum
-    if type(context) is np.ndarray:
-        context = torch.tensor(context).to(DEVICE)
+    print(f'\tcontext[0, 0, 0]: {context[0, 0, 0]}')
+    # if type(context) is np.ndarray:
+    #     context = torch.tensor(context).to(DEVICE)
 
+    print(f'reshaping context')
     context = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
+    print(f'\tcontext[0, 0]: {context[0, 0]}')
+    print(f'context.shape: {context.shape}')
     output = model(context)
+    print(f'output.shape: {output.shape}')
     context = torch.reshape(context, (context.shape[0], context.shape[1], NUM_PLAYERS, 24))
+    print(f'reshaping output')
     output = torch.reshape(output, (1, 1, NUM_PLAYERS, 24))
-    print(f'output[0, 0, :] = {output[0, 0, :]}')
+    print(f'output shale: {output.shape}')
+    print(f'output[0, 0]: {output[0, 0]}')
+    # print(f'output[0, 0, :] = {output[0, 0, :]}')
 
     ai_timeslice += 1
     out_d = get_data_from_output(output)
     context[0, ai_timeslice, ai_playernum] = output[0, 0, ai_playernum]
-    print(f'context[0, {ai_timeslice}, {ai_playernum}]: {context[0, ai_timeslice, ai_playernum]}')
-    print(f'output[0, 0, {ai_playernum}]: {output[0, 0, ai_playernum]}')
+    # print(f'context[:, {ai_timeslice}, {ai_playernum}]: {context[:, ai_timeslice, ai_playernum]}')
+    # print(f'output[0, 0, {ai_playernum}]: {output[0, 0, ai_playernum]}')
 
     return out_d
 
