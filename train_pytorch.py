@@ -10,7 +10,7 @@ from Bottleneck import Bottleneck
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_MODE"] = "offline"
+os.environ["WANDB_MODE"] = "online"
 DEVICE      = "cuda:0"
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
@@ -23,7 +23,7 @@ dataset = {}
 with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
     input = pickle.load(f)
 
-data    = np.asarray(input['data'])
+data    = np.asarray(input['data'], dtype=object)
 offsets = input['offsets']
 worldUUID    = input['worldUUID']
 sessionStart = input['sessionStart']
@@ -60,7 +60,7 @@ def read_one(data):
     global seq_index, ses_index
     sample = torch.tensor(data[ses_index][seq_index:seq_index+sequence_size])
     seq_index += sequence_size
-    if seq_index + sequence_size >= data.shape[1]:
+    if seq_index + sequence_size >= data[ses_index].shape[1]:
         seq_index = int(random() * sequence_size)
         ses_index += 1
         if ses_index >= data.shape[0]:

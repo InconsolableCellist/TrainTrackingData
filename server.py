@@ -1,44 +1,55 @@
 import os
 import pickle
 import torch
+import queue
 from flask import Flask, request, jsonify
 import numpy as np
 from DataInjestor import DataInjestor
 
-app = Flask(__name__)
-context = None # shape: [session, time, players, data]
-context_meta = None
-model   = None
-model_meta = None
-MODEL_NAME = 'blackcatmodel-steps_100-batchsize_5000-epochs_75-latentsize_2048.pkl'
-MODEL_PATH = 'models'
-MAX_TIMESTEPS = 1250
-NUM_PLAYERS = 30
 
-ai_playerUUID = ""
-ai_avatarID = ""
-ai_playernum = 0 # The index into the player dimension that shows where the AI character is contained
-ai_timeslice = 0 # The index into the time dimension for the AI player
+CONTEXT_MAX_SIZE = 1024 # defines a sliding window for the sequences (timeslices)
+MODEL_NAME       = 'blackcatmodel-steps_100-batchsize_5000-epochs_1-latentsize_2048.pkl'
+MODEL_PATH       = 'models'
+MAX_TIMESTEPS    = 1250
+NUM_PLAYERS      = 30
+DEVICE           = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+context_meta    = None
+context         = None # shape: [session, time, players, data]
+model           = None
+model_meta      = None
+ai_playerUUID   = ""
+ai_avatarID     = ""
+ai_playernum    = 0 # The index into the player dimension that shows where the AI character is contained
+ai_timeslice    = 0 # The index into the time dimension for the AI player
+
+app = Flask(__name__)
+
 
 offsets = {} # stores [ min_global_offset, max_global_offset, min_local_offset, max_local_offset]
 # these are used to un-normalize/scale the normalized data back into worldspace and proper local space
 
-DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-#data shape:
+# data shape:
 # [ batch_num, time, player_num, tracking_data ]
-# TODO: or maybe it's [session_num, batch_num, time, player_num, tracking_data]
 
 # execution workflow
 #   Server starts and loads model
-#   User sets the context (@POST /context)
-#       Server sets ai_playernum to the first available player_num
-#   User provides a playerUUID and avatarID for the AI character and the character's initial position (@POST /player, @POST /position)
+#   User adds the context (@POST /context)
+#       If unset, server sets ai_playernum to the first available player_num
+#       Context fills up to CONTEXT_MAX_SIZE, after which the older entries of the FIFO buffer are pushed out
+#   User provides a playerUUID and avatarID for the AI character (@POST /player)
 #       The playerUUID should match the training data, of the form "usr_...", avatarID of the form "avtr_..."
+#   User provides a history (real or fake) of the AI player's position, preferably as long as the context previously posted
+#       This will serve to kickstart the model into understanding what's expected of the AI player.
+#       It's recommended that the data be a typical start to joining a world and include full body, if that's the desired output
+#       TODO: A possible future improvement could be to add a library of common starters for different worlds, and use that as automated input
 #   User requests a prediction (@GET /prediction)
-#       Server runs the model with the context and the ai_playernum inserted into the context
-#       Server increments ai_timeslice and inserts that prediction into the context at [0, ai_timeslice, ai_playernum]
-#       Server returns all 24 tracking data values of [0, ai_timeslice, ai_playernum]
+#       Server runs the model with the provided context and the ai_playernum inserted into it
+#       Server returns just the AI-relevant portion of the prediction and discards everything it generated
+#           It'll be up to the caller to set new context with the AI's actual movements returned, at the real time the occurred
+
+# TODO: Necessary to produce and return multiple sequences? If so, would have to generate a temporary context and feed it back
 
 # gets x, y, and z from the array and returns it
 def get_xyz(data, offset):
@@ -61,17 +72,22 @@ def set_ai_playernum():
             break
 
 # This context should contain all the tracked data for every real character in the world over some period of time
+# It should only contain one session, i.e. [0, sequences, players, data]
+# If the context is greater than CONTEXT_MAX_SIZE, the oldest entries are pushed out
 @app.route('/context', methods=['POST'])
 def set_context():
     global context, context_meta, ai_playernum, ai_timeslice
     context_meta = request.json
     di = DataInjestor(max_timesteps=MAX_TIMESTEPS, max_players=NUM_PLAYERS)
     context = di.process_data(context_meta)
+    context = np.reshape(context, (1, context[0].shape[0], context[0].shape[1], 24))
+    print(f'type of context: {type(context)}')
+    # TODO: it won't be necessary to strip context down in prod
     context = context[:, :10, :, :]
-    print(f'context.shape: {context.shape}')
     set_ai_playernum()
 
-    context = torch.tensor(context).to(DEVICE)
+    # context = np.asarray(context)
+    # context = torch.tensor(context).to(DEVICE)
 
     # print(f'context[0, 0, 0]: {context[0, 0, 0]}')
     # context = di.data
@@ -79,11 +95,12 @@ def set_context():
     # context = torch.tensor(context).to(DEVICE)
     # context = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
 
-    return { 'success': True , 'input_shape': di.data.shape,
+    return { 'success': True , 'input_len': len(di.data),
              'max_timesteps': di.max_timesteps, 'max_players': di.max_players,
              'internal_shape': context.shape,
              'ai_playernum': ai_playernum, 'ai_timeslice': ai_timeslice,
-             'ai_playerUUID': ai_playerUUID, 'ai_avatarID': ai_avatarID }
+             'ai_playerUUID': ai_playerUUID, 'ai_avatarID': ai_avatarID,
+             'context_max_size': CONTEXT_MAX_SIZE }
 
 def get_data_from_output(d):
     out_d = { 'ai_timeslice' : ai_timeslice, 'ai_playernum' : ai_playernum, 'ai_playerUUID' : ai_playerUUID, 'data': [] }
@@ -113,26 +130,27 @@ def get_prediction():
     global context, ai_timeslice, ai_playernum
     print(f'\tcontext[0, 0, 0]: {context[0, 0, 0]}')
     # if type(context) is np.ndarray:
-    #     context = torch.tensor(context).to(DEVICE)
+    #      context = torch.tensor(context).to(DEVICE)
 
     print(f'reshaping context')
     context = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
-    print(f'\tcontext[0, 0]: {context[0, 0]}')
+    # print(f'\tcontext[0, 0]: {context[0, 0]}')
     print(f'context.shape: {context.shape}')
     output = model(context)
     print(f'output.shape: {output.shape}')
     context = torch.reshape(context, (context.shape[0], context.shape[1], NUM_PLAYERS, 24))
     print(f'reshaping output')
     output = torch.reshape(output, (1, 1, NUM_PLAYERS, 24))
-    print(f'output shale: {output.shape}')
-    print(f'output[0, 0]: {output[0, 0]}')
+    print(f'output shape: {output.shape}')
+    # print(f'output[0, 0]: {output[0, 0]}')
     # print(f'output[0, 0, :] = {output[0, 0, :]}')
 
     ai_timeslice += 1
     out_d = get_data_from_output(output)
-    context[0, ai_timeslice, ai_playernum] = output[0, 0, ai_playernum]
-    # print(f'context[:, {ai_timeslice}, {ai_playernum}]: {context[:, ai_timeslice, ai_playernum]}')
-    # print(f'output[0, 0, {ai_playernum}]: {output[0, 0, ai_playernum]}')
+    context[0, ai_timeslice, ai_playernum] = output[0, 0, ai_playernum] # need to dynamically resize context and/or do a sliding window
+    # print(f'context[0, {ai_timeslice-1}, {ai_playernum}]: {context[0, ai_timeslice-1, ai_playernum]}')
+    print(f'output[0, 0, {ai_playernum}]: {output[0, 0, ai_playernum]}')
+    print(f'output: {output}')
 
     return out_d
 
@@ -152,24 +170,45 @@ def set_playerUUID():
         : 'missing (@POST /context)' if context is None else 'OK' }
     return { 'success': False }
 
-# sets the initial position of the AI character
+# Sets the initial position of the AI character and the first sequences/timeslices
+# the number of sequences should match the amount of context provided earlier, which should also be the size of the
+# FIFO buffer of context data
+# See the overall documentation for more information as to what's expected
+# Query the @GET /info endpoint for a reminder of all that
+"""
+ { 'data' : [ 
+     { 'playerInstancePosition' : "(x, y, z)", 'playerInstanceRotation' : "(x, y, z)", ... },
+     { 'playerInstancePosition' : "(x, y, z)", 'playerInstanceRotation' : "(x, y, z)", ... },
+     ...
+     { 'playerInstancePosition' : "(x, y, z)", 'playerInstanceRotation' : "(x, y, z)", ... },
+    ] 
+}
+"""
 @app.route('/position', methods=['POST'])
 def set_position():
     global context, ai_timeslice, ai_playernum
     if context is None:
         return { 'success': False, 'context' : 'missing (@POST /context)' }
     data = request.json
-    context[0, 0, ai_playernum] = list(
-        DataInjestor.get_xyz_normalized(data['playerInstancePosition'], offsets['min_global_offset'], offsets['max_global_offset'])) + \
-        list(DataInjestor.get_xyz_normalized(data['playerInstanceRotation'], 0, 360)) + \
-        list(DataInjestor.get_xyz_normalized(data['headPosition'], offsets['min_local_offset'], offsets['max_local_offset'])) + \
-        list(DataInjestor.get_xyz_normalized(data['headRotation'], 0, 360)) + \
-        list(DataInjestor.get_xyz_normalized(data['leftHandPosition'], offsets['min_local_offset'], offsets['max_local_offset'])) + \
-        list(DataInjestor.get_xyz_normalized(data['leftHandRotation'], 0, 360)) + \
-        list(DataInjestor.get_xyz_normalized(data['rightHandPosition'], offsets['min_local_offset'], offsets['max_local_offset'])) + \
-        list(DataInjestor.get_xyz_normalized(data['rightHandRotation'], 0, 360))
 
-    return { 'success': True, 'context_normalized': context[0, 0, ai_playernum].tolist() }
+    for i in range(len(data['data'])):
+        d = data['data'][i]
+        context[0, i, ai_playernum] = list(
+            DataInjestor.get_xyz_normalized(d['playerInstancePosition'], offsets['min_global_offset'], offsets['max_global_offset'])) + \
+            list(DataInjestor.get_xyz_normalized(d['playerInstanceRotation'], 0, 360)) + \
+            list(DataInjestor.get_xyz_normalized(d['headPosition'], offsets['min_local_offset'], offsets['max_local_offset'])) + \
+            list(DataInjestor.get_xyz_normalized(d['headRotation'], 0, 360)) + \
+            list(DataInjestor.get_xyz_normalized(d['leftHandPosition'], offsets['min_local_offset'], offsets['max_local_offset'])) + \
+            list(DataInjestor.get_xyz_normalized(d['leftHandRotation'], 0, 360)) + \
+            list(DataInjestor.get_xyz_normalized(d['rightHandPosition'], offsets['min_local_offset'], offsets['max_local_offset'])) + \
+            list(DataInjestor.get_xyz_normalized(d['rightHandRotation'], 0, 360))
+
+    context = torch.tensor(context).to(DEVICE)
+    # junk_data = torch.rand_like(context)
+    # print(f'shape of junk_data: {junk_data.shape}')
+    # context[0, :, ai_playernum] = junk_data[0, :, ai_playernum]
+
+    return { 'success': True }
 
 # returns the ai_playernum
 @app.route('/playernum', methods=['GET'])
@@ -181,6 +220,14 @@ def get_all_ai_data():
     return jsonify({ 'ai_playerUUID' : ai_playerUUID, 'ai_avatarID' : ai_avatarID, 'ai_timeslice' : ai_timeslice,
                      'data' : context[0, :, ai_playernum].tolist(), 'context_shape': context.shape })
 
+# GETs information about what to provide and the current status
+# TODO: add stuff about FIFO
+@app.route('/info', methods=['GET'])
+def get_info():
+    return jsonify({ 'ai_playerUUID' : ai_playerUUID, 'ai_avatarID' : ai_avatarID, 'ai_timeslice' : ai_timeslice,
+                     'ai_playernum' : ai_playernum, 'context_shape': context.shape
+                     })
+
 def load_model(model_path, model_name):
     global model_meta, model, offsets
     print(f'Loading model from {model_path}/{model_name}')
@@ -191,7 +238,7 @@ def load_model(model_path, model_name):
 
 if __name__ == "__main__":
     load_model(MODEL_PATH, MODEL_NAME)
-    app.run(host='127.0.0.1', debug=True)
+    app.run(host='127.0.0.1', debug=False)
 
 
 ###

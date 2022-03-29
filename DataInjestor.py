@@ -212,3 +212,4 @@ class DataInjestor:
         """
 
         print(f'observed timesteps for this session: {observed_timesteps}')
+        return self.data

@@ -3,7 +3,7 @@ import json
 import torch, pickle, os
 import numpy as np
 
-MODEL_NAME  = 'blackcatmodel-steps_100-batchsize_5000-epochs_75-latentsize_2048.pkl'
+MODEL_NAME  = 'blackcatmodel-steps_100-batchsize_5000-epochs_75-latentsize_2048.old.pkl'
 MODEL_PATH  = 'models'
 DATAFILE_NAME = 'blackcatlocalposition.pkl'
 DATA_PATH   = 'dataset'
