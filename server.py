@@ -82,8 +82,6 @@ def set_context():
     context = di.process_data(context_meta)
     context = np.reshape(context, (1, context[0].shape[0], context[0].shape[1], 24))
     print(f'type of context: {type(context)}')
-    # TODO: it won't be necessary to strip context down in prod
-    context = context[:, :10, :, :]
     set_ai_playernum()
 
     # context = np.asarray(context)
@@ -133,15 +131,15 @@ def get_prediction():
     #      context = torch.tensor(context).to(DEVICE)
 
     print(f'reshaping context')
-    context = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
-    # print(f'\tcontext[0, 0]: {context[0, 0]}')
-    print(f'context.shape: {context.shape}')
-    output = model(context)
+    context_reshaped = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
+    print(f'context.shape: {context_reshaped.shape}')
+    output = model(context_reshaped)
     print(f'output.shape: {output.shape}')
-    context = torch.reshape(context, (context.shape[0], context.shape[1], NUM_PLAYERS, 24))
+    # context = torch.reshape(context, (context.shape[0], context.shape[1], NUM_PLAYERS, 24))
     print(f'reshaping output')
     output = torch.reshape(output, (1, 1, NUM_PLAYERS, 24))
     print(f'output shape: {output.shape}')
+    context[0, -1, ai_playernum] = output[0, 0, ai_playernum]
     # print(f'output[0, 0]: {output[0, 0]}')
     # print(f'output[0, 0, :] = {output[0, 0, :]}')
 
