@@ -10,7 +10,7 @@ from Bottleneck import Bottleneck
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_MODE"] = "online"
+os.environ["WANDB_MODE"] = "offline"
 DEVICE      = "cuda:0"
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
@@ -18,6 +18,7 @@ DATASET_PATH = 'dataset'
 MODEL_NAME = 'blackcatmodel'
 
 NUM_PLAYERS = 30
+NUM_DATA_POINTS = 42  # (3 floats for 14 tracked items)
 
 dataset = {}
 with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
@@ -31,7 +32,8 @@ sessionStart = input['sessionStart']
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 sequence_size   = 32 # ~3 per second
-num_epochs      = 75
+# num_epochs      = 75
+num_epochs      = 50
 batch_size      = 5000
 steps_per_epoch = 100
 latent_size     = 2048
@@ -91,8 +93,8 @@ def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_p
 
             output = model(batch_flat[:, :-1])
 
-            output = torch.reshape(output, (batch.shape[0], 1, NUM_PLAYERS, 24))
-            target = torch.reshape(batch[:, -1], (batch.shape[0], 1, NUM_PLAYERS, 24))
+            output = torch.reshape(output, (batch.shape[0], 1, NUM_PLAYERS, NUM_DATA_POINTS))
+            target = torch.reshape(batch[:, -1], (batch.shape[0], 1, NUM_PLAYERS, NUM_DATA_POINTS))
             loss = loss_fn(output, target)
             # if not step % 10:
             wandb.log({'loss': float(loss)})
@@ -109,19 +111,19 @@ def eval(model, optimizer, loss_fn, batch_size, steps):
 
         batch_flat = torch.reshape(batch, (batch.shape[0], batch.shape[1], batch.shape[2] * batch.shape[3]))
         output = model(batch_flat[:, :-1])
-        output = torch.reshape(output, (batch.shape[0], 1, NUM_PLAYERS, 24))
+        output = torch.reshape(output, (batch.shape[0], 1, NUM_PLAYERS, NUM_DATA_POINTS))
 
         # loss = loss_fn(output[:, :-1], batch[:, 1:])
-        target = torch.reshape(batch[:, -1], (batch.shape[0], 1, NUM_PLAYERS, 24))
+        target = torch.reshape(batch[:, -1], (batch.shape[0], 1, NUM_PLAYERS, NUM_DATA_POINTS))
         loss = loss_fn(output, target)
 
         wandb.log({'eval_loss': float(loss)})
         print(f'\tTraining loss: {loss.item()}')
 
 
-def pytorch_define_lstm_model(input_size, output_size, latent_size):
+def pytorch_define_lstm_model(latent_size):
     model = torch.nn.Sequential(
-        Bottleneck(latent_size=latent_size),
+        Bottleneck(latent_size=latent_size, num_players=NUM_PLAYERS, num_datapoints=NUM_DATA_POINTS),
         torch.nn.ReLU(),
         torch.nn.Linear(latent_size, latent_size),
         torch.nn.ReLU(),
@@ -130,7 +132,7 @@ def pytorch_define_lstm_model(input_size, output_size, latent_size):
         torch.nn.Linear(latent_size//2, latent_size//4),
         torch.nn.ReLU(),
         torch.nn.Flatten(),
-        torch.nn.Linear(latent_size//4, 1*NUM_PLAYERS*24),
+        torch.nn.Linear(latent_size//4, 1*NUM_PLAYERS*NUM_DATA_POINTS),
         torch.nn.ReLU(),
     )
     model.to(DEVICE)
@@ -144,7 +146,7 @@ def prepare_embedding():
 
 wandb.init(name="VRCTrackingModel", project="VRCTrackingModel")
 
-model       = pytorch_define_lstm_model(input_size=24, output_size=24, latent_size=latent_size)
+model       = pytorch_define_lstm_model(latent_size=latent_size)
 optimizer   = torch.optim.Adam(model.parameters(), lr=0.001)
 loss_fn     = torch.nn.MSELoss()
 embedding   = prepare_embedding() #torch.nn.Embedding(num_embeddings=NUM_PLAYERS, embedding_dim=1)
@@ -173,5 +175,5 @@ def save_model_pkl(model, model_filename):
     print(f'Saving model to {model_filename}')
     pickle.dump(model, open(model_filename, 'wb'))
 
-filename = f'{MODEL_NAME}-steps_{steps_per_epoch}-batchsize_{batch_size}-epochs_{num_epochs}-latentsize_{latent_size}'
+filename = os.path.join('models', f'{MODEL_NAME}-steps_{steps_per_epoch}-batchsize_{batch_size}-epochs_{num_epochs}-latentsize_{latent_size}')
 save_model_pkl(output, filename)

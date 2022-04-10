@@ -8,10 +8,12 @@ from DataInjestor import DataInjestor
 
 
 CONTEXT_MAX_SIZE = 1024 # defines a sliding window for the sequences (timeslices)
-MODEL_NAME       = 'blackcatmodel-steps_100-batchsize_5000-epochs_1-latentsize_2048.pkl'
+# MODEL_NAME       = 'blackcatmodel-steps_100-batchsize_5000-epochs_1-latentsize_2048.pkl'
+MODEL_NAME       = 'blackcatmodel-steps_100-batchsize_5000-epochs_50-latentsize_2048.pkl'
 MODEL_PATH       = 'models'
 MAX_TIMESTEPS    = 1250
 NUM_PLAYERS      = 30
+NUM_DATA_POINTS  = 42
 DEVICE           = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 context_meta    = None
@@ -59,11 +61,12 @@ def get_xyz(data, offset):
 # scales the x, y, and z, un-normalizing it, and returns it
 def get_xyz_scaled(data, offset, min_offset, max_offset):
     x, y, z = get_xyz(data, offset)
-    print(f'x: {x}, y: {y}, z: {z}')
-    x = x * (max_offset - min_offset) + min_offset
-    y = y * (max_offset - min_offset) + min_offset
-    z = z * (max_offset - min_offset) + min_offset
-    return f'{x:.6f},{y:.6f},{z:.6f}'
+    x, y, z = DataInjestor.scale_xyz(x, y, z, min_offset, max_offset)
+    # print(f'x: {x}, y: {y}, z: {z}')
+    # x = x * (max_offset - min_offset) + min_offset
+    # y = y * (max_offset - min_offset) + min_offset
+    # z = z * (max_offset - min_offset) + min_offset
+    return f'({x:.6f}, {y:.6f}, {z:.6f})'
 
 # This context should contain all the tracked data for every real character in the world over some period of time
 # It should only contain one session, i.e. [0, sequences, players, data]
@@ -74,7 +77,7 @@ def set_context():
     context_meta = request.json
     di = DataInjestor(max_timesteps=MAX_TIMESTEPS, max_players=NUM_PLAYERS)
     context = di.process_data(context_meta)
-    context = np.reshape(context, (1, context[0].shape[0], context[0].shape[1], 24))
+    context = np.reshape(context, (1, context[0].shape[0], context[0].shape[1], NUM_DATA_POINTS))
     print(f'type of context: {type(context)}')
 
     # context = np.asarray(context)
@@ -99,7 +102,7 @@ def get_data_from_output(d):
     datum = 0
     player['playerInstancePosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_global_offset'], offsets['max_global_offset'])
     datum += 3
-    print(f'Setting playerInstanceRotation using values: {d[0, 0, ai_playernum][datum:datum+3]}')
+    # print(f'Setting playerInstanceRotation using values: {d[0, 0, ai_playernum][datum:datum+3]}')
     player['playerInstanceRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
     datum += 3
     player['headPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
@@ -113,6 +116,19 @@ def get_data_from_output(d):
     player['rightHandPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
     datum += 3
     player['rightHandRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    datum += 3
+    player['leftFootPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
+    datum += 3
+    player['leftFootRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    datum += 3
+    player['rightFootPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
+    datum += 3
+    player['rightFootRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    datum += 3
+    player['hipPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
+    datum += 3
+    player['hipRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+
     out_d['data'].append(player)
     return out_d
 
@@ -125,7 +141,7 @@ def get_prediction():
 
     context_reshaped = torch.reshape(context, (context.shape[0], context.shape[1], context.shape[2] * context.shape[3]))
     output = model(context_reshaped)
-    output = torch.reshape(output, (1, 1, NUM_PLAYERS, 24))
+    output = torch.reshape(output, (1, 1, NUM_PLAYERS, NUM_DATA_POINTS))
     # context[0, -1, ai_playernum] = output[0, 0, ai_playernum]
     # print(f'output[0, 0]: {output[0, 0]}')
     # print(f'output[0, 0, :] = {output[0, 0, :]}')

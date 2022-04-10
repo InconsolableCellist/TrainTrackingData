@@ -63,7 +63,7 @@ def save_output(output, offsets, filename):
     if not os.path.exists('output'):
         os.makedirs('output')
     f = open(os.path.join('output', 'prediction.json'), 'w')
-    out_d = { 'sesionStart' : model_meta['sessionStart'],
+    out_d = { 'sessionStart' : model_meta['sessionStart'],
               'worldUUID' : model_meta['worldUUID'],
               'data' : [] }
     for playernum in range(0, output.shape[2]-1):
@@ -93,6 +93,21 @@ def save_output(output, offsets, filename):
                                                      offsets['max_local_offset'])
         datum += 3
         player['rightHandRotation'] = get_xyz_scaled(output[0][0][playernum], datum, 360, 360)
+        player['leftFootPosition'] = get_xyz_scaled(output[0][0][playernum], datum,
+                                                    offsets['min_local_offset'],
+                                                    offsets['max_local_offset'])
+        datum += 3
+        player['leftFootRotation'] = get_xyz_scaled(output[0][0][playernum], datum, 360, 360)
+        datum += 3
+        player['rightFootPosition'] = get_xyz_scaled(output[0][0][playernum], datum,
+                                                     offsets['min_local_offset'],
+                                                     offsets['max_local_offset'])
+        datum += 3
+        player['hipPosition'] = get_xyz_scaled(output[0][0][playernum], datum,
+                                               offsets['min_local_offset'],
+                                               offsets['max_local_offset'])
+        datum += 3
+        player['hipRotation'] = get_xyz_scaled(output[0][0][playernum], datum, 360, 360)
         out_d['data'].append(player)
     json.dump(out_d, f)
     f.close()

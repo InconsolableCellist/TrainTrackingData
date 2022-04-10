@@ -36,6 +36,24 @@
           "playerInstancePosition": "(3.903553, 0.994997, 7.229539)",
           "playerInstanceRotation": "(0.033118, 66.259820, 0.157565)"
         },
+
+        canonical list of data the model computes
+                        playerInstancePosition
+                        playerInstanceRotation
+                        headPosition
+                        headRotation
+                        leftHandPosition
+                        leftHandRotation
+                        rightHandPosition
+                        rightHandRotation
+                        leftFootPosition
+                        leftFootRotation
+                        rightFootPosition
+                        rightFootRotation
+                        hipPosition
+                        hipRotation
+
+                        = 42 floats
         """
 ###
 
@@ -66,6 +84,32 @@ class DataInjestor:
         self.min_local_offset = int(1e9)
         pass
 
+    # Checks to see if `data` conforms to the expected schema, returns a tuple of (valid, error_message)
+    @staticmethod
+    def check_format(data):
+        succ = (True, "")
+        for x in ['sessionStart', 'worldUUID', 'data']:
+            if x not in data:
+                succ = (False, "Missing top-level key: " + x)
+                break
+            for user_key in data['data']:
+                for x in ['displayName', 'userName', 'playerUUID', 'avatarID', 'tracking_data']:
+                    if x not in data['data'][user_key]:
+                        succ = (False, f'Entry for user {user_key} is missing key: {x}')
+                        break
+                    for tracking_data in data['data'][user_key]['tracking_data']:
+                        for x in ['timestamp', 'headPosition', 'headRotation', 'leftHandPosition', 'leftHandRotation',
+                                  'rightHandPosition', 'rightHandRotation', 'leftFootPosition', 'leftFootRotation',
+                                  'rightFootPosition', 'rightFootRotation',  # no knees or elbows
+                                  'hipPosition', 'hipRotation',
+                                  'playerInstancePosition', 'playerInstanceRotation']:
+                            if x not in tracking_data:
+                                succ = (False, f'Tracking data entry for user {user_key} is missing key: {x}')
+                                break
+
+
+        return succ
+
     @staticmethod
     def get_xyz(tupleString):
         x, y, z = tupleString[1:-1].split(',')
@@ -77,32 +121,35 @@ class DataInjestor:
         return (x - min_offset) / (max_offset - min_offset), (y - min_offset) / (max_offset - min_offset), \
                (z - min_offset) / (max_offset - min_offset)
 
+    @staticmethod
+    def scale_xyz(x, y, z, min_offset, max_offset):
+        x = x * (max_offset - min_offset) + min_offset
+        y = y * (max_offset - min_offset) + min_offset
+        z = z * (max_offset - min_offset) + min_offset
+        return x, y, z
 
-    # Iterates through all the data and finds the bounds (min and max) for the global position and local offsets
-    # Then returns them as (min_global, max_global, min_local, max_local)
-    def get_positional_offset_range(self, d):
-        max_global_offset, max_local_offset, min_global_offset, min_local_offset = -1, -1, int(1e9), int(1e9)
+    # Iterates through all the data and finds the bounds (min and max) for the global position and local offsets and sets it
+    def set_positional_offset_range(self, d):
         for entry in d['data']:
             for td in d['data'][entry]['tracking_data']:
                 a = max(self.get_xyz(td['playerInstancePosition']))
                 b = min(self.get_xyz(td['playerInstancePosition']))
-                if a > max_global_offset:
-                    max_global_offset = a
-                if b < min_global_offset:
-                    min_global_offset = b
+                if a > self.max_global_offset:
+                    self.max_global_offset = a
+                    print(f'New max global offset: {self.max_global_offset}')
+                if b < self.min_global_offset:
+                    self.min_global_offset = b
+                    print(f'New min global offset: {self.min_global_offset}')
 
                 for val in ['headPosition', 'leftHandPosition', 'rightHandPosition']:
                     a = max(self.get_xyz(td[val]))
                     b = min(self.get_xyz(td[val]))
-                    if a > max_local_offset:
-                        max_local_offset = a
-                    if b < min_local_offset:
-                        min_local_offset = b
-        self.max_global_offset = max_global_offset
-        self.max_local_offset = max_local_offset
-        self.min_global_offset = min_global_offset
-        self.min_local_offset = min_local_offset
-        return (min_global_offset, max_global_offset, min_local_offset, max_local_offset)
+                    if a > self.max_local_offset:
+                        self.max_local_offset = a
+                        print(f'New max local offset: {self.max_local_offset}')
+                    if b < self.min_local_offset:
+                        self.min_local_offset = b
+                        print(f'New min local offset: {self.min_local_offset}')
 
     # Iterates through input data and checks to see if all playerdata is zero, and if so it returns the timeslice
     # right before it
@@ -130,28 +177,16 @@ class DataInjestor:
         # sessionStart = data_f['sessionStart']
         last_filled_timeslice = self.get_last_filled_timeslice(data_f['data'])
 
-        # print(f'self.data shape before stripping timeslices: {self.data.shape}')
-        # valid_timeslices = []
-        # for i in range(0, last_filled_timeslice):
-        #     valid_timeslices.append(self.data[datafile_num, i])
-        # print(f'length of valid_timeslices: {len(valid_timeslices)}')
-        # valid_timeslices = np.zeros((len(valid_timeslices), self.max_players, 24))
-        self.data.append(np.zeros((last_filled_timeslice, self.max_players, 24), dtype=np.float32))
-        # print(f'shape of valid_timeslices: {valid_timeslices.shape}')
-        # self.data[datafile_num] = valid_timeslices
-        # self.data[datafile_num] = valid_timeslices
-        # print(f'self.data shape when considering only valid timeslices: {self.data.shape}')
+        self.data.append(np.zeros((last_filled_timeslice, self.max_players, 42), dtype=np.float32))
         print(f'Last filled timeslice: {last_filled_timeslice}')
         print(f'Shape of self.data[{datafile_num}]: {self.data[datafile_num].shape}')
 
-        self.min_global_pos, self.max_global_pos, self.min_local_pos, self.max_local_pos = self.get_positional_offset_range(data_f)
+        # self.min_global_pos, self.max_global_pos, self.min_local_pos, self.max_local_pos = self.get_positional_offset_range(data_f)
         for entry in data_f['data']:
-            player_data = []
             if player_num > self.max_players:
                 break
             player = data_f['data'][entry]
             self.players['playerUUID'] = player_num
-            # print(f'Processing player {player_num} with UUID {player["playerUUID"]}')
             time = 0
             for td in player['tracking_data']:
                 if time > self.max_timesteps:
@@ -161,19 +196,31 @@ class DataInjestor:
                     avg_time_offset[player_num] += (data_time_ms - last_time)
                 last_time = data_time_ms
 
-                self.data[datafile_num][time, player_num] = list(
-                # player_data.append(list(
-                    self.get_xyz_normalized(td['playerInstancePosition'], self.min_global_pos, self.max_global_pos)) \
-                                                            + list(self.get_xyz_normalized(td['playerInstanceRotation'], 0, 360)) \
-                                                            + list(self.get_xyz_normalized(td['headPosition'], self.min_global_pos, self.max_global_pos)) \
-                                                            + list(self.get_xyz_normalized(td['headRotation'], 0, 360)) \
-                                                            + list(
-                    self.get_xyz_normalized(td['leftHandPosition'], self.min_global_pos, self.max_global_pos)) \
-                                                            + list(self.get_xyz_normalized(td['leftHandRotation'], 0, 360)) \
-                                                            + list(
-                    self.get_xyz_normalized(td['rightHandPosition'], self.min_global_pos, self.max_global_pos)) \
-                                                            + list(self.get_xyz_normalized(td['rightHandRotation'], 0, 360))
-                vals_added += 18
+                # print(f'before global normalization exmaple: {self.get_xyz(td["playerInstancePosition"])}')
+                # x, y, z = self.get_xyz_normalized(td['playerInstancePosition'], self.min_global_pos, self.max_global_pos)
+                # print(f'after local normalization example: {x}, {y}, {z}')
+                # print(f'scaled back: {self.scale_xyz(x, y, z, self.min_global_pos, self.max_global_pos)}')
+                # print(f'before local normalization example: {self.get_xyz(td["headPosition"])}')
+                # x, y, z = self.get_xyz_normalized(td['headPosition'], self.min_local_pos, self.max_local_pos)
+                # print(f'after local normalization example: {x}, {y}, {z}')
+                # print(f'scaled back: {self.scale_xyz(x, y, z, self.min_local_pos, self.max_local_pos)}')
+
+                self.data[datafile_num][time, player_num] = \
+                          list(self.get_xyz_normalized(td['playerInstancePosition'], self.min_global_pos, self.max_global_pos)) \
+                        + list(self.get_xyz_normalized(td['playerInstanceRotation'], 0, 360)) \
+                        + list(self.get_xyz_normalized(td['headPosition'], self.min_global_pos, self.max_global_pos)) \
+                        + list(self.get_xyz_normalized(td['headRotation'], 0, 360)) \
+                        + list(self.get_xyz_normalized(td['leftHandPosition'], self.min_global_pos, self.max_global_pos)) \
+                        + list(self.get_xyz_normalized(td['leftHandRotation'], 0, 360)) \
+                        + list(self.get_xyz_normalized(td['rightHandPosition'], self.min_global_pos, self.max_global_pos)) \
+                        + list(self.get_xyz_normalized(td['rightHandRotation'], 0, 360)) \
+                        + list(self.get_xyz_normalized(td['leftFootPosition'], self.min_global_pos, self.max_global_pos)) \
+                        + list(self.get_xyz_normalized(td['leftFootRotation'], 0, 360)) \
+                        + list(self.get_xyz_normalized(td['rightFootPosition'], self.min_global_pos, self.max_global_pos)) \
+                        + list(self.get_xyz_normalized(td['rightFootRotation'], 0, 360)) \
+                        + list(self.get_xyz_normalized(td['hipPosition'], self.min_global_pos, self.max_global_pos)) \
+                        + list(self.get_xyz_normalized(td['hipRotation'], 0, 360))
+                vals_added += 42
 
                 time += 1
             observed_timesteps[player_num] = time
