@@ -10,8 +10,10 @@ from Bottleneck import Bottleneck
 from VRCDataset import VRCDataset
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_MODE"] = "offline"
 DEVICE      = "cuda:0"
+
+os.environ["WANDB_MODE"] = "offline"
+TRAIN       = True
 
 DATASET_FILE = 'blackcatlocalposition.pkl'
 DATASET_PATH = 'dataset'
@@ -101,9 +103,9 @@ def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_p
             print(f'\tStep {step} loss: {loss.item()}')
             loss.backward()
             optimizer.step()
-        eval(model, optimizer, loss_fn, batch_size, steps_per_epoch)
+        eval(model, loss_fn)
 
-def eval(model, optimizer, loss_fn, batch_size, steps):
+def eval(model, loss_fn):
     print(f'Evaluating model')
     with torch.no_grad():
         batch = read_batch(train_data)
@@ -119,7 +121,6 @@ def eval(model, optimizer, loss_fn, batch_size, steps):
 
         wandb.log({'eval_loss': float(loss)})
         print(f'\tTraining loss: {loss.item()}')
-
 
 def pytorch_define_lstm_model(latent_size):
     model = torch.nn.Sequential(
@@ -144,6 +145,21 @@ def prepare_embedding():
         embedding.weight.data[player, 0] = torch.tensor([player])
     return embedding
 
+def save_model_pkl(model, model_filename):
+    if os.path.exists(model_filename + '.pkl'):
+        model_filename = model_filename + '-' + time.strftime("%Y%m%d-%H%M%S") + '.pkl'
+    else:
+        model_filename = model_filename + '.pkl'
+    print(f'Saving model to {model_filename}')
+    pickle.dump(model, open(model_filename, 'wb'))
+
+def load_model_pkl(model_filename):
+    print(f'Loading model from {model_filename}')
+    model = None
+    if os.path.exists(model_filename  + '.pkl'):
+        model = pickle.load(open(model_filename + '.pkl', 'rb'))
+    return model
+
 wandb.init(name="VRCTrackingModel", project="VRCTrackingModel")
 
 model       = pytorch_define_lstm_model(latent_size=latent_size)
@@ -157,23 +173,20 @@ print(f'Batch size: {batch_size}')
 print(f'Training on {num_epochs} epochs')
 print(f'Device: {DEVICE}')
 print(f'Loss_fn: {loss_fn}')
-pytorch_train_on_data(model=model, optimizer=optimizer,
-                      loss_fn=loss_fn, epochs=num_epochs, batch_size=batch_size,
-                      steps_per_epoch=steps_per_epoch)
+if TRAIN == True:
+    pytorch_train_on_data(model=model, optimizer=optimizer, loss_fn=loss_fn, epochs=num_epochs, batch_size=batch_size,
+                          steps_per_epoch=steps_per_epoch)
 
 output = { 'model': model,
            'offsets': offsets,
            'worldUUID': worldUUID,
-           'sessionStart': sessionStart
-          }
-
-def save_model_pkl(model, model_filename):
-    if os.path.exists(model_filename + '.pkl'):
-        model_filename = model_filename + '-' + time.strftime("%Y%m%d-%H%M%S") + '.pkl'
-    else:
-        model_filename = model_filename + '.pkl'
-    print(f'Saving model to {model_filename}')
-    pickle.dump(model, open(model_filename, 'wb'))
+           'sessionStart': sessionStart }
 
 filename = os.path.join('models', f'{MODEL_NAME}-steps_{steps_per_epoch}-batchsize_{batch_size}-epochs_{num_epochs}-latentsize_{latent_size}')
 save_model_pkl(output, filename)
+
+print(f'Loading model from {filename} to test it was saved properly')
+model_meta  = load_model_pkl(filename)
+model       = model_meta['model']
+offsets     = model_meta['offsets']
+eval(model, loss_fn)

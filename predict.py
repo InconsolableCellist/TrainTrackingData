@@ -69,7 +69,6 @@ def save_output(output, offsets, filename):
     for playernum in range(0, output.shape[2]-1):
         player = {}
         datum = 0
-        # player['playerInstancePosition'] = make_xyz(output[0][0][playernum], datum)
         player['playerInstancePosition'] = get_xyz_scaled(output[0][0][playernum], datum,
                                                           offsets['min_global_offset'],
                                                           offsets['max_global_offset'])

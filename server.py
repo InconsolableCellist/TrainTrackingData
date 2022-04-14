@@ -102,7 +102,6 @@ def get_data_from_output(d):
     datum = 0
     player['playerInstancePosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_global_offset'], offsets['max_global_offset'])
     datum += 3
-    # print(f'Setting playerInstanceRotation using values: {d[0, 0, ai_playernum][datum:datum+3]}')
     player['playerInstanceRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
     datum += 3
     player['headPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
