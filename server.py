@@ -8,8 +8,7 @@ from DataInjestor import DataInjestor
 
 
 CONTEXT_MAX_SIZE = 1024 # defines a sliding window for the sequences (timeslices)
-# MODEL_NAME       = 'blackcatmodel-steps_100-batchsize_5000-epochs_1-latentsize_2048.pkl'
-MODEL_NAME       = 'blackcatmodel-steps_100-batchsize_5000-epochs_50-latentsize_2048.pkl'
+MODEL_NAME       = 'blackcatmodel_no_normalization-steps_100-batchsize_5000-epochs_50-latentsize_3072.pkl'
 MODEL_PATH       = 'models'
 MAX_TIMESTEPS    = 1250
 NUM_PLAYERS      = 30
@@ -25,10 +24,6 @@ ai_avatarID     = ""
 ai_playernum    = 0 # The index into the player dimension that shows where the AI character is contained
 
 app = Flask(__name__)
-
-
-offsets = {} # stores [ min_global_offset, max_global_offset, min_local_offset, max_local_offset]
-# these are used to un-normalize/scale the normalized data back into worldspace and proper local space
 
 
 # data shape:
@@ -56,17 +51,7 @@ def get_xyz(data, offset):
     x = data[offset]
     y = data[offset + 1]
     z = data[offset + 2]
-    return x, y, z
-
-# scales the x, y, and z, un-normalizing it, and returns it
-def get_xyz_scaled(data, offset, min_offset, max_offset):
-    x, y, z = get_xyz(data, offset)
-    x, y, z = DataInjestor.scale_xyz(x, y, z, min_offset, max_offset)
-    # print(f'x: {x}, y: {y}, z: {z}')
-    # x = x * (max_offset - min_offset) + min_offset
-    # y = y * (max_offset - min_offset) + min_offset
-    # z = z * (max_offset - min_offset) + min_offset
-    return f'({x:.6f}, {y:.6f}, {z:.6f})'
+    return f'{x:.6f}, {y:.6f}, {z:.6f}'
 
 # This context should contain all the tracked data for every real character in the world over some period of time
 # It should only contain one session, i.e. [0, sequences, players, data]
@@ -97,36 +82,37 @@ def set_context():
              'context_max_size': CONTEXT_MAX_SIZE }
 
 def get_data_from_output(d):
+    print(f'd is {d}')
     out_d = { 'ai_playernum' : ai_playernum, 'ai_playerUUID' : ai_playerUUID, 'data': [] }
     player = {}
     datum = 0
-    player['playerInstancePosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_global_offset'], offsets['max_global_offset'])
+    player['playerInstancePosition'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['playerInstanceRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    player['playerInstanceRotation'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['headPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
+    player['headPosition'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['headRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    player['headRotation'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['leftHandPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
+    player['leftHandPosition'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['leftHandRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    player['leftHandRotation'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['rightHandPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
+    player['rightHandPosition'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['rightHandRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    player['rightHandRotation'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['leftFootPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
+    player['leftFootPosition'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['leftFootRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    player['leftFootRotation'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['rightFootPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
+    player['rightFootPosition'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['rightFootRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    player['rightFootRotation'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['hipPosition'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, offsets['min_local_offset'], offsets['max_local_offset'])
+    player['hipPosition'] = get_xyz(d[0, 0, ai_playernum], datum)
     datum += 3
-    player['hipRotation'] = get_xyz_scaled(d[0, 0, ai_playernum], datum, 0, 360)
+    player['hipRotation'] = get_xyz(d[0, 0, ai_playernum], datum)
 
     out_d['data'].append(player)
     return out_d
@@ -185,12 +171,20 @@ def get_info():
                      })
 
 def load_model(model_path, model_name):
-    global model_meta, model, offsets
+    global model_meta, model
     print(f'Loading model from {model_path}/{model_name}')
     with open(os.path.join(model_path, model_name), 'rb') as f:
         model_meta = pickle.load(f)
         model   = model_meta['model']
-        offsets = model_meta['offsets']
+        if model is not None:
+            print(f'Loaded model')
+        else:
+            print(f'Failed to load model')
+
+@app.route('/load_model', methods=['GET'])
+def load_model_endpoint():
+    load_model(MODEL_PATH, MODEL_NAME)
+    return jsonify({ 'success': True })
 
 if __name__ == "__main__":
     load_model(MODEL_PATH, MODEL_NAME)

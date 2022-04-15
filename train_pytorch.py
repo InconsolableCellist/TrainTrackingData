@@ -12,12 +12,15 @@ from VRCDataset import VRCDataset
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 DEVICE      = "cuda:0"
 
-os.environ["WANDB_MODE"] = "offline"
+os.environ["WANDB_MODE"] = "online"
 TRAIN       = True
+SAVE_MODEL  = True
+LOAD_CHECKPOINT = False
+CHECKPOINT = os.path.join('models', 'blackcatmodel_no_normalization-steps_100-batchsize_5000-epochs_50-latentsize_2048')
 
-DATASET_FILE = 'blackcatlocalposition.pkl'
+DATASET_FILE = 'blackcatlocalposition_no_normalization.pkl'
 DATASET_PATH = 'dataset'
-MODEL_NAME = 'blackcatmodel'
+MODEL_NAME = 'blackcatmodel_no_normalization'
 
 NUM_PLAYERS = 30
 NUM_DATA_POINTS = 42  # (3 floats for 14 tracked items)
@@ -27,7 +30,6 @@ with open(os.path.join(DATASET_PATH, DATASET_FILE), 'rb') as f:
     input = pickle.load(f)
 
 data    = np.asarray(input['data'], dtype=object)
-offsets = input['offsets']
 worldUUID    = input['worldUUID']
 sessionStart = input['sessionStart']
 
@@ -38,7 +40,7 @@ sequence_size   = 32 # ~3 per second
 num_epochs      = 50
 batch_size      = 5000
 steps_per_epoch = 100
-latent_size     = 2048
+latent_size     = 3072
 seq_index       = 0
 ses_index       = 0
 
@@ -81,7 +83,7 @@ print(f'test data shape: {test_data.shape}')
 # print(f'read_batch shape: {read_batch(train_data).shape}')
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-def pytorch_train_on_data(model, optimizer, loss_fn, epochs, batch_size, steps_per_epoch):
+def pytorch_train_on_data(model, optimizer, loss_fn, epochs, steps_per_epoch):
     for epoch in range(epochs):
         print(f'Epoch {epoch}')
         for step in range(steps_per_epoch):
@@ -134,7 +136,6 @@ def pytorch_define_lstm_model(latent_size):
         torch.nn.ReLU(),
         torch.nn.Flatten(),
         torch.nn.Linear(latent_size//4, 1*NUM_PLAYERS*NUM_DATA_POINTS),
-        torch.nn.ReLU(),
     )
     model.to(DEVICE)
     return model
@@ -167,6 +168,10 @@ optimizer   = torch.optim.Adam(model.parameters(), lr=0.001)
 loss_fn     = torch.nn.MSELoss()
 embedding   = prepare_embedding() #torch.nn.Embedding(num_embeddings=NUM_PLAYERS, embedding_dim=1)
 
+if LOAD_CHECKPOINT is True:
+    model_meta = load_model_pkl(CHECKPOINT)
+    model = model_meta['model']
+    print(f'Loaded model from checkpoint')
 
 print(f'Steps per epoch: {steps_per_epoch}')
 print(f'Batch size: {batch_size}')
@@ -174,19 +179,17 @@ print(f'Training on {num_epochs} epochs')
 print(f'Device: {DEVICE}')
 print(f'Loss_fn: {loss_fn}')
 if TRAIN == True:
-    pytorch_train_on_data(model=model, optimizer=optimizer, loss_fn=loss_fn, epochs=num_epochs, batch_size=batch_size,
-                          steps_per_epoch=steps_per_epoch)
+    pytorch_train_on_data(model=model, optimizer=optimizer, loss_fn=loss_fn, epochs=num_epochs, steps_per_epoch=steps_per_epoch)
 
 output = { 'model': model,
-           'offsets': offsets,
            'worldUUID': worldUUID,
            'sessionStart': sessionStart }
 
 filename = os.path.join('models', f'{MODEL_NAME}-steps_{steps_per_epoch}-batchsize_{batch_size}-epochs_{num_epochs}-latentsize_{latent_size}')
-save_model_pkl(output, filename)
+if SAVE_MODEL is True:
+    save_model_pkl(output, filename)
 
 print(f'Loading model from {filename} to test it was saved properly')
 model_meta  = load_model_pkl(filename)
 model       = model_meta['model']
-offsets     = model_meta['offsets']
 eval(model, loss_fn)

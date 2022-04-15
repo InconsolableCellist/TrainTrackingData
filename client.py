@@ -28,10 +28,11 @@ def get_initial_context():
                 break
             data.append(td)
             i += 1
-        players[k] = { 'displayName': player['displayName'], 'userName': player['userName'],
-                       'playerUUID': player['playerUUID'], 'avatarID': player['avatarID'],
-                       'tracking_data': data }
-        print(f'added {k} with {len(data)} entries')
+        if len(data) > 0:
+            players[k] = { 'displayName': player['displayName'], 'userName': player['userName'],
+                           'playerUUID': player['playerUUID'], 'avatarID': player['avatarID'],
+                           'tracking_data': data }
+            print(f'added {k} with {len(data)} entries')
 
     context = { 'data': players, 'worldUUID': context_meta['worldUUID'], 'sessionStart': context_meta['sessionStart'] }
     return context
@@ -74,6 +75,15 @@ def call_set_context():
         exit(1)
     print(f'Sucessfully set the context')
 
+def call_set_model():
+    r = requests.get(PREDICTION_SERVER + '/load_model')
+    print(f'Response: {r.status_code}')
+    if r.status_code != 200:
+        print(f'Error: {r.text}')
+        exit(1)
+    print(f'Successfully loaded the model')
+
+call_set_model()
 call_set_context()
 
 player_info = { 'playerUUID': 'usr_cff9574d-5e52-4366-89e4-e75c1e7fb5bd',
@@ -85,7 +95,7 @@ if r.status_code != 200:
     print(f'Error: {r.text}')
     exit(1)
 
-print(f'Sucessfully set the player')
+print(f'Successfully set the player')
 
 def call_get_prediction():
     print(f'Getting one prediction')
@@ -98,7 +108,6 @@ def call_get_prediction():
 
     return r.json()
 
-prediciton = r.json()
 for i in range(0, 512):
     new_data = call_get_prediction()
     update_context(context['data'], new_data)

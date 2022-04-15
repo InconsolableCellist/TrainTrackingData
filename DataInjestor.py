@@ -74,14 +74,6 @@ class DataInjestor:
         self.worldUUID    = ""
         self.sessionStart = 0.0
         self.players      = {}
-        self.min_global_pos = int(1e9)
-        self.max_global_pos = -1
-        self.min_local_pos = int(1e9)
-        self.max_local_pos = -1
-        self.max_global_offset = -1
-        self.max_local_offset = -1
-        self.min_global_offset = int(1e9)
-        self.min_local_offset = int(1e9)
         pass
 
     # Checks to see if `data` conforms to the expected schema, returns a tuple of (valid, error_message)
@@ -115,42 +107,6 @@ class DataInjestor:
         x, y, z = tupleString[1:-1].split(',')
         return float(x), float(y), float(z)
 
-    @staticmethod
-    def get_xyz_normalized(tupleString, min_offset, max_offset):
-        x, y, z = DataInjestor.get_xyz(tupleString)
-        return (x - min_offset) / (max_offset - min_offset), (y - min_offset) / (max_offset - min_offset), \
-               (z - min_offset) / (max_offset - min_offset)
-
-    @staticmethod
-    def scale_xyz(x, y, z, min_offset, max_offset):
-        x = x * (max_offset - min_offset) + min_offset
-        y = y * (max_offset - min_offset) + min_offset
-        z = z * (max_offset - min_offset) + min_offset
-        return x, y, z
-
-    # Iterates through all the data and finds the bounds (min and max) for the global position and local offsets and sets it
-    def set_positional_offset_range(self, d):
-        for entry in d['data']:
-            for td in d['data'][entry]['tracking_data']:
-                a = max(self.get_xyz(td['playerInstancePosition']))
-                b = min(self.get_xyz(td['playerInstancePosition']))
-                if a > self.max_global_offset:
-                    self.max_global_offset = a
-                    print(f'New max global offset: {self.max_global_offset}')
-                if b < self.min_global_offset:
-                    self.min_global_offset = b
-                    print(f'New min global offset: {self.min_global_offset}')
-
-                for val in ['headPosition', 'leftHandPosition', 'rightHandPosition']:
-                    a = max(self.get_xyz(td[val]))
-                    b = min(self.get_xyz(td[val]))
-                    if a > self.max_local_offset:
-                        self.max_local_offset = a
-                        print(f'New max local offset: {self.max_local_offset}')
-                    if b < self.min_local_offset:
-                        self.min_local_offset = b
-                        print(f'New min local offset: {self.min_local_offset}')
-
     # Iterates through input data and checks to see if all playerdata is zero, and if so it returns the timeslice
     # right before it
     def get_last_filled_timeslice(self, d):
@@ -181,7 +137,6 @@ class DataInjestor:
         print(f'Last filled timeslice: {last_filled_timeslice}')
         print(f'Shape of self.data[{datafile_num}]: {self.data[datafile_num].shape}')
 
-        # self.min_global_pos, self.max_global_pos, self.min_local_pos, self.max_local_pos = self.get_positional_offset_range(data_f)
         for entry in data_f['data']:
             if player_num > self.max_players:
                 break
@@ -196,30 +151,21 @@ class DataInjestor:
                     avg_time_offset[player_num] += (data_time_ms - last_time)
                 last_time = data_time_ms
 
-                # print(f'before global normalization exmaple: {self.get_xyz(td["playerInstancePosition"])}')
-                # x, y, z = self.get_xyz_normalized(td['playerInstancePosition'], self.min_global_pos, self.max_global_pos)
-                # print(f'after local normalization example: {x}, {y}, {z}')
-                # print(f'scaled back: {self.scale_xyz(x, y, z, self.min_global_pos, self.max_global_pos)}')
-                # print(f'before local normalization example: {self.get_xyz(td["headPosition"])}')
-                # x, y, z = self.get_xyz_normalized(td['headPosition'], self.min_local_pos, self.max_local_pos)
-                # print(f'after local normalization example: {x}, {y}, {z}')
-                # print(f'scaled back: {self.scale_xyz(x, y, z, self.min_local_pos, self.max_local_pos)}')
-
                 self.data[datafile_num][time, player_num] = \
-                          list(self.get_xyz_normalized(td['playerInstancePosition'], self.min_global_pos, self.max_global_pos)) \
-                        + list(self.get_xyz_normalized(td['playerInstanceRotation'], 0, 360)) \
-                        + list(self.get_xyz_normalized(td['headPosition'], self.min_global_pos, self.max_global_pos)) \
-                        + list(self.get_xyz_normalized(td['headRotation'], 0, 360)) \
-                        + list(self.get_xyz_normalized(td['leftHandPosition'], self.min_global_pos, self.max_global_pos)) \
-                        + list(self.get_xyz_normalized(td['leftHandRotation'], 0, 360)) \
-                        + list(self.get_xyz_normalized(td['rightHandPosition'], self.min_global_pos, self.max_global_pos)) \
-                        + list(self.get_xyz_normalized(td['rightHandRotation'], 0, 360)) \
-                        + list(self.get_xyz_normalized(td['leftFootPosition'], self.min_global_pos, self.max_global_pos)) \
-                        + list(self.get_xyz_normalized(td['leftFootRotation'], 0, 360)) \
-                        + list(self.get_xyz_normalized(td['rightFootPosition'], self.min_global_pos, self.max_global_pos)) \
-                        + list(self.get_xyz_normalized(td['rightFootRotation'], 0, 360)) \
-                        + list(self.get_xyz_normalized(td['hipPosition'], self.min_global_pos, self.max_global_pos)) \
-                        + list(self.get_xyz_normalized(td['hipRotation'], 0, 360))
+                        list(self.get_xyz(td['playerInstancePosition'])) \
+                        + list(self.get_xyz(td['playerInstanceRotation'])) \
+                        + list(self.get_xyz(td['headPosition'])) \
+                        + list(self.get_xyz(td['headRotation'])) \
+                        + list(self.get_xyz(td['leftHandPosition'])) \
+                        + list(self.get_xyz(td['leftHandRotation'])) \
+                        + list(self.get_xyz(td['rightHandPosition'])) \
+                        + list(self.get_xyz(td['rightHandRotation'])) \
+                        + list(self.get_xyz(td['leftFootPosition'])) \
+                        + list(self.get_xyz(td['leftFootRotation'])) \
+                        + list(self.get_xyz(td['rightFootPosition'])) \
+                        + list(self.get_xyz(td['rightFootRotation'])) \
+                        + list(self.get_xyz(td['hipPosition'])) \
+                        + list(self.get_xyz(td['hipRotation']))
                 vals_added += 42
 
                 time += 1
@@ -235,11 +181,7 @@ class DataInjestor:
               f' with a standard deviation of {np.std(observed_timesteps):.2f} timesteps')
         print('\tAverage time differential between datapoints is: {:.4f} ms '.format(np.average(avg_time_offset)) +
               'with a standard deviation of ' + '{:.4f} ms '.format(np.std(avg_time_offset)))
-        print("\tmin and max world positional data were: (" + str(self.min_global_pos) + ", " + str(self.max_global_pos) +
-              "), normalized to 0.0 to 1.0")
-        print("\tmin and max local positional data were: (" + str(self.min_local_pos) + ", " + str(self.max_local_pos) +
-              "), normalized to 0.0 to 1.0")
-        print("\tmin and max rotational (Euler) data were assumed to be 0 to 360, normalized to 0.0 to 1.0")
+        print('\tNo normalization was done.')
 
         # example
         """
